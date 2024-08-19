@@ -1,8 +1,15 @@
 use crate::Backend;
 use log::{debug, error};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{
-    collections::VecDeque, fs::File, hash::Hasher, io::{BufRead, BufReader, Read}, path::PathBuf, rc::Rc, sync::Arc
+    collections::VecDeque,
+    fs::File,
+    hash::Hasher,
+    io::{BufRead, BufReader, Read},
+    path::PathBuf,
+    rc::Rc,
+    sync::Arc,
 };
 use tower_lsp::lsp_types::{CompletionParams, Position};
 use tree_ds::prelude::*;
@@ -21,24 +28,30 @@ pub enum Token {
     OTHER = '🤪' as isize,
 }
 
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum JSONUIValue {
-    KeyValuePair((Rc<str>,Box<JSONUIValue>)),
-    ControlTree(AutoTree::<Box<JSONUIValue>>),
-    String(Rc<str>),
-    Array(Vec<Box<JSONUIValue>>),
-    Number(f32)
+    KeyValuePair(Option<(Rc<str>, Box<JSONUIValue>)>),
+    Controls(Option<Vec<Box<JSONUIValue>>>),
+    String(Option<Rc<str>>),
+    Array(Option<Vec<Box<JSONUIValue>>>),
+    Number(f32),
+    Bool(bool),
+    Colon,
+    Comma,
 }
 impl Eq for JSONUIValue {}
 
 impl PartialEq for JSONUIValue {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
+            (JSONUIValue::Bool(a), JSONUIValue::Bool(b)) => a.eq(b),
             (JSONUIValue::Number(a), JSONUIValue::Number(b)) => (a - b).abs() < f32::EPSILON,
             (JSONUIValue::String(a), JSONUIValue::String(b)) => a.eq(b),
             (JSONUIValue::Array(a), JSONUIValue::Array(b)) => a.eq(b),
-            (JSONUIValue::ControlTree(a), JSONUIValue::ControlTree(b)) => a.eq(b),
+            (JSONUIValue::Controls(a), JSONUIValue::Controls(b)) => a.eq(b),
             (JSONUIValue::KeyValuePair(a), JSONUIValue::KeyValuePair(b)) => a.eq(b),
+            (JSONUIValue::Colon, JSONUIValue::Colon) => true,
+            (JSONUIValue::Comma, JSONUIValue::Comma) => true,
             _ => false,
         }
     }
@@ -47,19 +60,14 @@ impl PartialEq for JSONUIValue {
 impl std::hash::Hash for JSONUIValue {
     fn hash<H: Hasher>(&self, state: &mut H) {
         match self {
-            JSONUIValue::Array(v)=>{
-                v.hash(state)
-            }
-            JSONUIValue::ControlTree(v)=>{
-                v.hash(state)
-            }
-            JSONUIValue::KeyValuePair(v)=>{
-                v.hash(state)
-            }
-            JSONUIValue::String(v)=>{
-                v.hash(state)
-            }
-            JSONUIValue::Number(v)=>{
+            JSONUIValue::Array(v) => v.hash(state),
+            JSONUIValue::Controls(v) => v.hash(state),
+            JSONUIValue::KeyValuePair(v) => v.hash(state),
+            JSONUIValue::String(v) => v.hash(state),
+            JSONUIValue::Colon => 17.hash(state),
+            JSONUIValue::Comma => 19.hash(state),
+            JSONUIValue::Bool(b) => b.hash(state),
+            JSONUIValue::Number(v) => {
                 if v.is_nan() {
                     0.hash(state);
                 } else {
@@ -155,7 +163,7 @@ impl Completer {
         for i in forward {
             result += i.chars().count();
         }
-        result = result + index + (line - 1) -1;
+        result = result + index + (line - 1) - 1;
         Some(result)
     }
 
@@ -180,10 +188,10 @@ impl Completer {
                             .skip_while(|(_, c)| *c != '"')
                             .skip(1)
                             .next();
-                        if let Some((index, _)) = opt{
+                        if let Some((index, _)) = opt {
                             start_index = Some(f_len - index);
                             break;
-                        }else{
+                        } else {
                             return None;
                         }
                     } else {
@@ -222,24 +230,111 @@ impl Completer {
         }
     }
 
-    //the goal is to get two pieces infomation
-    //1. identify the type of control that current position belongs to.
-    //2. retrieve the surrounding context in current position
-    fn compelte_0(&self, bk: &Backend, pos: &Position) -> Option<Rc<str>> {
+    fn compelte_0(&self, pos: &Position) -> Option<Rc<str>> {
+        //the goal is to get two pieces infomation
+        //1. identify the type of control that current position belongs to.
+        //2. retrieve the surrounding context in current position
         let indices = self.get_boundary_indices(pos);
-        if let Some((l,r)) = indices{
-            let splice_control = &self.content_cache[l..r+1];
-            let mut peekable = splice_control.chars().peekable();
+        if let Some((l, r)) = indices {
+            let splice_control = &self.content_cache[l..r];
+            let mut peekable = splice_control.chars().peekable().enumerate();
 
-            return None
-        }else{
-            return None
+            let mut stack: VecDeque<JSONUIValue> = VecDeque::new();
+
+            let mut str_builder = String::new();
+
+            while let Some((index, c)) = peekable.next() {
+                match c.into() {
+                    Token::Quote => {
+                        if stack.iter().all(|f| {
+                            if let JSONUIValue::String(None) = f {
+                                false
+                            } else {
+                                true
+                            }
+                        }){
+                            stack.push_back(JSONUIValue::String(None));
+                        } else {
+                            if let Some(JSONUIValue::String(None)) = stack.pop_back(){
+                                stack.push_back(JSONUIValue::String(Some(Rc::from(
+                                    str_builder.clone(),
+                                ))));
+                                str_builder.clear();
+                            } else {
+                                unreachable!("Error: An error occurred at index {}.", index)
+                            }
+                        }
+                    }
+                    Token::LeftBrace => stack.push_back(JSONUIValue::Controls(None)),
+                    Token::RightBrace => {
+                        let mut tmp_vec: Vec<Box<JSONUIValue>> = Vec::new();
+                        let mut vaild = false;
+                        while let Some(f) = stack.pop_back() {
+                            if let JSONUIValue::Controls(None) = f {
+                                stack.push_back(JSONUIValue::Controls(Some(tmp_vec.to_owned())));
+                                vaild = true;
+                                break;
+                            } else {
+                                tmp_vec.push(Box::new(f));
+                                break;
+                            }
+                        }
+                        if !vaild {
+                            panic!()
+                        }
+                    }
+                    Token::LeftBracket => stack.push_back(JSONUIValue::Array(None)),
+                    Token::RightBracket => {
+                        let mut tmp_vec: Vec<Box<JSONUIValue>> = Vec::new();
+                        let mut vaild = false;
+                        while let Some(f) = stack.pop_back() {
+                            if let JSONUIValue::Array(None) = f {
+                                stack.push_back(JSONUIValue::Array(Some(tmp_vec.to_owned())));
+                                vaild = true;
+                                break;
+                            } else {
+                                tmp_vec.push(Box::new(f));
+                                break;
+                            }
+                        }
+                        if !vaild {
+                            panic!()
+                        }
+                    }
+                    Token::OTHER => {
+                        if Token::is_ignore(&c) {
+                            continue;
+                        }
+                        str_builder.push(c);
+                    }
+                    Token::Comma => {
+                        stack.push_back(JSONUIValue::Comma);
+                        //extra tow pattern for number and bool
+                        if !str_builder.is_empty() {
+                            if let Ok(boolean) = str_builder.parse::<bool>() {
+                                stack.push_back(JSONUIValue::Bool(boolean));
+                                str_builder.clear();
+                            } else if let Ok(float) = str_builder.parse::<f32>() {
+                                stack.push_back(JSONUIValue::Number(float));
+                                str_builder.clear();
+                            }
+                        }
+                    }
+                    Token::Colon => stack.push_back(JSONUIValue::Colon),
+                }
+            }
+
+            println!("{}", json!(stack));
+
+            return None;
+        } else {
+            return None;
         }
     }
 
     pub fn compelte(&self, bk: &Backend, param: &CompletionParams) {
         debug!("{}", json!(param));
-        self.compelte_0(bk, &param.text_document_position.position);
+        self.compelte_0(&param.text_document_position.position);
     }
 }
 
@@ -349,5 +444,14 @@ mod tests {
             character: 20,
         });
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_compelte_0() {
+        let completer = Completer::from(EXAMPLE1.into());
+        completer.compelte_0(&Position {
+            line: 2,
+            character: 25,
+        });
     }
 }
