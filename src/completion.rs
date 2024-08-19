@@ -2,16 +2,12 @@ use crate::Backend;
 use log::{debug, error};
 use serde_json::json;
 use std::{
-    collections::VecDeque,
-    fs::File,
-    io::{BufRead, BufReader, Read},
-    iter::Peekable,
-    ops::Deref,
-    path::PathBuf,
-    rc::Rc,
-    sync::Arc,
+    collections::VecDeque, fs::File, hash::Hasher, io::{BufRead, BufReader, Read}, path::PathBuf, rc::Rc, sync::Arc
 };
 use tower_lsp::lsp_types::{CompletionParams, Position};
+use tree_ds::prelude::*;
+
+type AutoTree<T> = Tree<u32, T>;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
@@ -23,6 +19,55 @@ pub enum Token {
     Colon = ':' as isize,
     Quote = '"' as isize,
     OTHER = '🤪' as isize,
+}
+
+#[derive(Clone,Debug)]
+pub enum JSONUIValue {
+    KeyValuePair((Rc<str>,Box<JSONUIValue>)),
+    ControlTree(AutoTree::<Box<JSONUIValue>>),
+    String(Rc<str>),
+    Array(Vec<Box<JSONUIValue>>),
+    Number(f32)
+}
+impl Eq for JSONUIValue {}
+
+impl PartialEq for JSONUIValue {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (JSONUIValue::Number(a), JSONUIValue::Number(b)) => (a - b).abs() < f32::EPSILON,
+            (JSONUIValue::String(a), JSONUIValue::String(b)) => a.eq(b),
+            (JSONUIValue::Array(a), JSONUIValue::Array(b)) => a.eq(b),
+            (JSONUIValue::ControlTree(a), JSONUIValue::ControlTree(b)) => a.eq(b),
+            (JSONUIValue::KeyValuePair(a), JSONUIValue::KeyValuePair(b)) => a.eq(b),
+            _ => false,
+        }
+    }
+}
+
+impl std::hash::Hash for JSONUIValue {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        match self {
+            JSONUIValue::Array(v)=>{
+                v.hash(state)
+            }
+            JSONUIValue::ControlTree(v)=>{
+                v.hash(state)
+            }
+            JSONUIValue::KeyValuePair(v)=>{
+                v.hash(state)
+            }
+            JSONUIValue::String(v)=>{
+                v.hash(state)
+            }
+            JSONUIValue::Number(v)=>{
+                if v.is_nan() {
+                    0.hash(state);
+                } else {
+                    v.to_bits().hash(state);
+                }
+            }
+        }
+    }
 }
 
 pub enum CompleteType {
@@ -180,12 +225,12 @@ impl Completer {
     //the goal is to get two pieces infomation
     //1. identify the type of control that current position belongs to.
     //2. retrieve the surrounding context in current position
-
     fn compelte_0(&self, bk: &Backend, pos: &Position) -> Option<Rc<str>> {
         let indices = self.get_boundary_indices(pos);
         if let Some((l,r)) = indices{
             let splice_control = &self.content_cache[l..r+1];
-            
+            let mut peekable = splice_control.chars().peekable();
+
             return None
         }else{
             return None
