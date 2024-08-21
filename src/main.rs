@@ -203,7 +203,7 @@ impl LanguageServer for Backend {
     }
 
     // trigger in file change
-    async fn did_change(&self,  _: DidChangeTextDocumentParams) {}
+    async fn did_change(&self, _: DidChangeTextDocumentParams) {}
 
     /// do insert namespace and cache_type map for save file
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
@@ -272,7 +272,7 @@ impl LanguageServer for Backend {
 
         let cmp_v = cmp.get(&hash_value);
         if let Some(vv) = cmp_v {
-            vv.compelte(&self, &params);
+            vv.compelte(&self, &params).await;
         }
         Ok(None)
     }
@@ -330,6 +330,28 @@ impl Backend {
         let hash_value = hash_uri(url);
         let mut idmap = self.id_2_namespace_map.lock().await;
         idmap.entry(hash_value).or_insert(namespace);
+    }
+
+    async fn query_namespace(&self, url: &Url) -> Option<Arc<str>> {
+        let hash_value = hash_uri(url);
+        let idmap = self.id_2_namespace_map.lock().await;
+        if let Some(v) = idmap.get(&hash_value) {
+            Some(v.to_owned())
+        } else {
+            None
+        }
+    }
+
+    async fn query_type(&self, namespace: Arc<str>, control_n: Arc<str>) -> Option<String>{
+        let v = self.cache_type_map.lock().await;
+        let map = v.get(namespace.as_ref());
+        if let Some(map_v) = map {
+            let type_n = map_v.get(control_n.as_ref());
+            if let Some(type_name) = type_n {
+                return Some(type_name.clone());
+            }
+        }
+        None
     }
 
     async fn insert_control_type<'a>(

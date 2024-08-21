@@ -1,8 +1,6 @@
 use crate::Backend;
 use log::{debug, error};
-use serde_json::{json, value::Index};
 use std::{
-    cell::RefCell,
     collections::VecDeque,
     fmt,
     fs::File,
@@ -10,7 +8,8 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
-use tower_lsp::lsp_types::{CompletionParams, Position};
+use tokio::sync::Mutex;
+use tower_lsp::lsp_types::{CompletionItem, CompletionParams, Position};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
@@ -155,19 +154,21 @@ impl Token {
 
 #[derive(Debug)]
 struct CompleteContext<'a> {
-    l: RefCell<usize>,
-    r: RefCell<usize>,
-    index: RefCell<usize>,
-    nodes: RefCell<(Option<&'a Value>, Option<&'a Value>, Option<&'a Value>)>,
+    control_type: Mutex<Option<Arc<str>>>,
+    l: Mutex<usize>,
+    r: Mutex<usize>,
+    index: Mutex<usize>,
+    nodes: Mutex<(Option<&'a Value>, Option<&'a Value>, Option<&'a Value>)>,
 }
 
 impl<'a> CompleteContext<'a> {
     pub fn empty() -> Self {
         CompleteContext {
-            r: RefCell::new(0),
-            l: RefCell::new(0),
-            index: RefCell::new(0),
-            nodes: RefCell::new((None, None, None)),
+            control_type: Mutex::new(None),
+            r: Mutex::new(0),
+            l: Mutex::new(0),
+            index: Mutex::new(0),
+            nodes: Mutex::new((None, None, None)),
         }
     }
 }
@@ -176,7 +177,7 @@ impl<'a> CompleteContext<'a> {
 pub(crate) struct Completer {
     line_cache: Arc<Vec<Arc<str>>>,
     content_cache: Arc<str>,
-    ast: RefCell<Option<Vec<Value>>>,
+    ast: Mutex<Option<Vec<Value>>>,
 }
 
 impl Drop for Completer {
@@ -203,7 +204,7 @@ impl Completer {
         Completer {
             line_cache: lines.into(),
             content_cache: content_cache.into(),
-            ast: RefCell::new(None),
+            ast: Mutex::new(None),
         }
     }
 
@@ -212,7 +213,7 @@ impl Completer {
         Completer {
             line_cache: Arc::new(lines),
             content_cache: str,
-            ast: RefCell::new(None),
+            ast: Mutex::new(None),
         }
     }
 
@@ -230,17 +231,27 @@ impl Completer {
         }
     }
 
-    fn find_closest_node<'a>(input: &'a [Value], context: &'a CompleteContext<'a>) {
+    async fn find_closest_node<'a>(input: &'a [Value], context: &'a CompleteContext<'a>) {
         let mut result = Vec::new();
         Self::flatten_ast(input, &mut result);
-        let v_index = *context.index.borrow();
-
+        let v_index = *context.index.lock().await;
         let mut containing_node: Option<&'a Value> = None;
         let mut contain_index: isize = -1;
-        for (index, node) in result.iter().enumerate() {
-            if node.l <= v_index && v_index <= node.r {
-                containing_node = Some(node);
+        for (index, value) in result.iter().enumerate() {
+            if value.l <= v_index && v_index <= value.r {
+                containing_node = Some(value);
                 contain_index = index as isize;
+            }
+            if value.type_id == TYPE_STR
+                && let Some(Node::String(v)) = &value.v
+                && v.as_ref() == "type"
+            {
+                let type_node_index = index + 2;
+                if type_node_index < result.len()
+                    && let Some(Node::String(type_v)) = &result[type_node_index].v
+                {
+                    *context.control_type.lock().await = Some(type_v.clone());
+                }
             }
         }
         let before = contain_index - 1;
@@ -255,7 +266,7 @@ impl Completer {
         } else {
             None
         };
-        *context.nodes.borrow_mut() = (closest_before, containing_node, closest_after);
+        *context.nodes.lock().await = (closest_before, containing_node, closest_after);
     }
 
     fn get_content_index(&self, pos: &Position) -> Option<usize> {
@@ -274,107 +285,157 @@ impl Completer {
         Some(result)
     }
 
-    fn get_boundary_indices(&self, pos: &Position) -> Option<(usize, usize, usize)> {
+    fn get_boundary_indices(&self, index: usize) -> Option<(usize, usize)> {
         let mut stack: VecDeque<char> = VecDeque::new();
-
-        let index = self.get_content_index(pos);
-        if let Some(index) = index {
-            let (forward, backward) = self.content_cache.split_at(index);
-            if forward.is_empty() || backward.is_empty() {
-                return None;
-            }
-            let f_len = forward.chars().count();
-            let mut start_index: Option<usize> = None;
-            let mut forward_iter = forward.chars().rev().peekable().enumerate();
-            while let Some((_, ch)) = forward_iter.next() {
-                if ch == '{' {
-                    if stack.is_empty() {
-                        let opt = forward_iter
-                            .skip_while(|(_, c)| *c != '"')
-                            .skip(1)
-                            .skip_while(|(_, c)| *c != '"')
-                            .skip(1)
-                            .next();
-                        if let Some((index, _)) = opt {
-                            start_index = Some(f_len - index);
-                            break;
-                        } else {
-                            return None;
-                        }
-                    } else {
-                        stack.pop_back();
-                    }
-                } else if ch == '}' {
-                    stack.push_back(ch);
-                }
-            }
-            if start_index.is_none() {
-                return None;
-            }
-
-            stack.clear();
-            let mut end_index: Option<usize> = None;
-            let mut backend_iter = backward.chars().peekable().enumerate();
-            while let Some((index, ch)) = backend_iter.next() {
-                if ch == '}' {
-                    if stack.is_empty() {
-                        end_index = Some(index + f_len);
+        let (forward, backward) = self.content_cache.split_at(index);
+        if forward.is_empty() || backward.is_empty() {
+            return None;
+        }
+        let f_len = forward.chars().count();
+        let mut start_index: Option<usize> = None;
+        let mut forward_iter = forward.chars().rev().peekable().enumerate();
+        while let Some((_, ch)) = forward_iter.next() {
+            if ch == '{' {
+                if stack.is_empty() {
+                    let opt = forward_iter
+                        .skip_while(|(_, c)| *c != '"')
+                        .skip(1)
+                        .skip_while(|(_, c)| *c != '"')
+                        .skip(1)
+                        .next();
+                    if let Some((index, _)) = opt {
+                        start_index = Some(f_len - index);
                         break;
                     } else {
-                        stack.pop_back();
+                        return None;
                     }
-                } else if ch == '{' {
-                    stack.push_back(ch);
+                } else {
+                    stack.pop_back();
                 }
+            } else if ch == '}' {
+                stack.push_back(ch);
             }
-            if end_index.is_none() {
-                return None;
-            }
+        }
+        if start_index.is_none() {
+            return None;
+        }
 
-            Some((start_index.unwrap(), end_index.unwrap(), index))
+        stack.clear();
+        let mut end_index: Option<usize> = None;
+        let mut backend_iter = backward.chars().peekable().enumerate();
+        while let Some((index, ch)) = backend_iter.next() {
+            if ch == '}' {
+                if stack.is_empty() {
+                    end_index = Some(index + f_len);
+                    break;
+                } else {
+                    stack.pop_back();
+                }
+            } else if ch == '{' {
+                stack.push_back(ch);
+            }
+        }
+        if end_index.is_none() {
+            return None;
+        }
+
+        Some((start_index.unwrap(), end_index.unwrap()))
+    }
+
+    pub async fn compelte(
+        &self,
+        bk: &Backend,
+        param: &CompletionParams,
+    ) -> Option<Vec<CompletionItem>> {
+        let pos = &param.text_document_position.position;
+
+        let context: CompleteContext = CompleteContext::empty();
+        let index = self.get_content_index(pos);
+        let mut index_value = 0;
+        if let Some(index_v) = index {
+            *context.index.lock().await = index_v;
+            index_value = index_v;
         } else {
             return None;
         }
-    }
 
-    pub fn compelte(&self, bk: &Backend, param: &CompletionParams) {
-        let pos = param.text_document_position.position;
-        self.compelte0(&pos);
-    }
-
-    fn compelte0(&self, pos: &Position) {
-        let context: CompleteContext = CompleteContext {
-            r: RefCell::new(0),
-            l: RefCell::new(0),
-            index: RefCell::new(0),
-            nodes: RefCell::new((None, None, None)),
+        let cache_miss = {
+            let ast = self.ast.lock().await;
+            if let Some(ast) = ast.as_ref() {
+                ast.iter().all(|f| f.l > index_value && f.r < index_value)
+            } else {
+                true
+            }
         };
-        let vec_is_none = if self.ast.borrow().is_none() {
-            true
+
+        if cache_miss {
+            self.build_ast(index_value, &context).await;
+        }
+
+        let ast = self.ast.lock().await;
+        if let Some(input) = ast.as_ref() {
+            Self::find_closest_node(input, &context).await;
+            let mut control_type_mut = context.control_type.lock().await;
+            if control_type_mut.is_none()
+                && let Some(Node::String(v)) = &input[0].v
+            {
+                let url = &param.text_document_position.text_document.uri;
+                let namespace: Option<Arc<str>> = bk.query_namespace(url).await;
+                let control_t = self.fill_control_type(bk, namespace, v).await;
+                if let Some(v) = control_t {
+                    *control_type_mut = Some(Arc::from(v.as_str()));
+                }
+                {
+                    return None;
+                }
+            }
         } else {
-            false
-        };
-        if vec_is_none {
-            self.build_ast(pos, &context);
+            return None;
         }
-        let ast = self.ast.borrow();
-        let input_option = ast.as_ref();
-        if let Some(input) = input_option {
-            Self::find_closest_node(input, &context);
-        }
-        println!("{:?}", context);
+
+        self.create_completion_information(&context)
     }
 
-    fn build_ast<'a>(&self, pos: &'a Position, context: &'a CompleteContext<'a>) {
-        let mut ast = self.ast.borrow_mut();
+    async fn fill_control_type(
+        &self,
+        bk: &Backend,
+        namespace: Option<Arc<str>>,
+        control_name: &Arc<str>,
+    ) -> Option<String> {
+        let vec: Vec<&str> = control_name.as_ref().split("@").collect();
+        if vec.len() == 1
+            && let Some(np) = namespace
         {
-            if ast.is_some() {
-                return;
+            return bk.query_type(np, Arc::from(vec[0])).await;
+        } else if vec.len() == 2 {
+            let refer_namespace = vec[1];
+            let namespace_sp: Vec<&str> = refer_namespace.split(".").collect();
+            if namespace_sp.len() == 2 {
+                let refer_namespace_n = namespace_sp[0];
+                let refer_control_n = namespace_sp[1];
+                return bk
+                    .query_type(Arc::from(refer_namespace_n), Arc::from(refer_control_n))
+                    .await;
+            } else if namespace_sp.len() == 1
+                && let Some(np) = namespace
+            {
+                return bk.query_type(np, Arc::from(namespace_sp[0])).await;
             }
         }
+        None
+    }
 
-        let indices = self.get_boundary_indices(pos);
-        if let Some((l, r, pos_index)) = indices {
+    fn create_completion_information(
+        &self,
+        context: &CompleteContext,
+    ) -> Option<Vec<CompletionItem>> {
+        debug!("{:?}", context);
+        None
+    }
+
+    async fn build_ast<'a>(&self, index: usize, context: &'a CompleteContext<'a>) {
+        let indices = self.get_boundary_indices(index);
+        if let Some((l, r)) = indices {
             let splice_control = &self.content_cache[l..r + 1];
             let mut peekable = splice_control.chars().peekable().enumerate();
             let mut stack: VecDeque<Value> = VecDeque::new();
@@ -409,11 +470,9 @@ impl Completer {
                 }
             }
 
-            *ast = Some(stack.into_iter().collect());
-
-            *context.l.borrow_mut() = l;
-            *context.r.borrow_mut() = r;
-            *context.index.borrow_mut() = pos_index;
+            *self.ast.lock().await = Some(stack.into_iter().collect());
+            *context.l.lock().await = l;
+            *context.r.lock().await = r;
         }
     }
 
@@ -437,8 +496,6 @@ impl Completer {
                     v: Some(Node::String(Arc::from(str_builder.clone()))),
                 });
                 str_builder.clear();
-            } else {
-                panic!("Error: An error occurred at index {}.", index);
             }
         }
     }
@@ -459,7 +516,6 @@ impl Completer {
                 tmp_vec.push(f);
             }
         }
-        panic!("Unmatched right brace at index {}.", index);
     }
 
     fn handle_right_bracket(stack: &mut VecDeque<Value>, index: usize) {
@@ -478,7 +534,6 @@ impl Completer {
                 tmp_vec.push(f);
             }
         }
-        panic!("Unmatched right bracket at index {}.", index);
     }
 
     fn handle_comma(stack: &mut VecDeque<Value>, str_builder: &mut String, index: usize) {
@@ -599,11 +654,16 @@ mod tests {
     #[test]
     fn test_get_boundary_indices() {
         let completer = Completer::from(EXAMPLE1.into());
-        let result = completer.get_boundary_indices(&Position {
-            line: 2,
-            character: 25,
-        });
-        let (l, r, _) = result.unwrap();
+
+        let v: usize = completer
+            .get_content_index(&Position {
+                line: 2,
+                character: 25,
+            })
+            .unwrap();
+
+        let result = completer.get_boundary_indices(v);
+        let (l, r) = result.unwrap();
         let lc = completer.content_cache.chars().nth(l).unwrap();
         let rc = completer.content_cache.chars().nth(r).unwrap();
         assert_eq!((lc, rc), ('"', '}'));
@@ -612,43 +672,47 @@ mod tests {
     #[test]
     fn test_get_boundary_indices_error() {
         let completer = Completer::from(EXAMPLE1.into());
-        let result = completer.get_boundary_indices(&Position {
-            line: 14,
-            character: 20,
-        });
+
+        let v = completer
+            .get_content_index(&Position {
+                line: 14,
+                character: 20,
+            })
+            .unwrap();
+
+        let result = completer.get_boundary_indices(v);
         assert_eq!(result, None);
     }
 
-    #[test]
-    fn test_build_ast() {
+    #[tokio::test]
+    async fn test_build_ast() {
         let completer = Completer::from(EXAMPLE1.into());
-        completer.build_ast(
-            &Position {
+
+        let v = completer
+            .get_content_index(&Position {
                 line: 2,
                 character: 25,
-            },
-            &mut CompleteContext::empty(),
-        );
+            })
+            .unwrap();
+        let mut context = &CompleteContext::empty();
+        completer.build_ast(v, &mut context).await;
+        let result = completer.ast.lock().await;
+        assert!(result.is_some());
     }
 
-    #[test]
-    fn test_build_ast_error() {
+    #[tokio::test]
+    async fn test_build_ast_error() {
         let completer = Completer::from(EXAMPLE1.into());
-        completer.build_ast(
-            &Position {
+        let v = completer
+            .get_content_index(&Position {
                 line: 14,
                 character: 21,
-            },
-            &mut CompleteContext::empty(),
-        );
-    }
+            })
+            .unwrap();
 
-    #[test]
-    fn test_complete0() {
-        let completer = Completer::from(EXAMPLE1.into());
-        completer.compelte0(&Position {
-            line: 2,
-            character: 25,
-        });
+        let mut context = &CompleteContext::empty();
+        completer.build_ast(v, &mut context).await;
+        let result = completer.ast.lock().await;
+        assert!(result.is_none());
     }
 }
