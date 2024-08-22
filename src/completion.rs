@@ -1,15 +1,17 @@
+use crate::document::Document;
 use crate::Backend;
 use log::{debug, error};
 use std::{
-    collections::VecDeque,
+    collections::{HashMap, VecDeque},
     fmt,
-    fs::File,
+    hash::Hash,
     io::{BufReader, Read},
-    path::PathBuf,
     sync::Arc,
 };
 use tokio::sync::Mutex;
-use tower_lsp::lsp_types::{CompletionItem, CompletionParams, Position};
+use tower_lsp::lsp_types::{
+    CompletionItem, CompletionParams, DidChangeTextDocumentParams, Position,
+};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
@@ -158,6 +160,7 @@ struct CompleteContext<'a> {
     l: Mutex<usize>,
     r: Mutex<usize>,
     index: Mutex<usize>,
+    input_char: Mutex<char>,
     nodes: Mutex<(Option<&'a Value>, Option<&'a Value>, Option<&'a Value>)>,
 }
 
@@ -167,6 +170,7 @@ impl<'a> CompleteContext<'a> {
             control_type: Mutex::new(None),
             r: Mutex::new(0),
             l: Mutex::new(0),
+            input_char: Mutex::new(' '),
             index: Mutex::new(0),
             nodes: Mutex::new((None, None, None)),
         }
@@ -175,59 +179,15 @@ impl<'a> CompleteContext<'a> {
 
 #[derive(Debug)]
 pub(crate) struct Completer {
-    line_cache: Arc<Vec<Arc<str>>>,
-    content_cache: Arc<str>,
+    document: Document,
     ast: Mutex<Option<Vec<Value>>>,
 }
 
-impl Drop for Completer {
-    fn drop(&mut self) {
-        error!(
-            "Completer is being dropped with {} lines cached.",
-            self.line_cache.len()
-        );
-    }
-}
-
 impl Completer {
-    pub fn new(path: &PathBuf) -> Self {
-        let file = File::open(path).unwrap();
-        let mut reader = BufReader::new(file);
-        let mut content_cache = String::new();
-        reader.read_to_string(&mut content_cache).unwrap();
-
-        let lines: Vec<Arc<str>> = content_cache
-            .as_str()
-            .lines()
-            .map(|line| Arc::from(line))
-            .collect();
-        Completer {
-            line_cache: lines.into(),
-            content_cache: content_cache.into(),
-            ast: Mutex::new(None),
-        }
-    }
-
     pub fn from(str: Arc<str>) -> Self {
-        let lines: Vec<Arc<str>> = str.lines().map(|line| Arc::from(line)).collect();
         Completer {
-            line_cache: Arc::new(lines),
-            content_cache: str,
+            document: Document::from(&str.to_string()),
             ast: Mutex::new(None),
-        }
-    }
-
-    fn flatten_ast<'a>(input: &'a [Value], result: &mut Vec<&'a Value>) {
-        for i in input {
-            if let Some(v) = &i.v {
-                result.push(i);
-                match v {
-                    Node::Array(sub) | Node::Controls(sub) => {
-                        Self::flatten_ast(sub, result);
-                    }
-                    _ => {}
-                }
-            }
         }
     }
 
@@ -235,12 +195,12 @@ impl Completer {
         let mut result = Vec::new();
         Self::flatten_ast(input, &mut result);
         let v_index = *context.index.lock().await;
-        let mut containing_node: Option<&'a Value> = None;
-        let mut contain_index: isize = -1;
+        let mut node: Option<&'a Value> = None;
+        let mut node_index: usize = 0;
         for (index, value) in result.iter().enumerate() {
-            if value.l <= v_index && v_index <= value.r {
-                containing_node = Some(value);
-                contain_index = index as isize;
+            if value.r < v_index {
+                node = Some(value);
+                node_index = index;
             }
             if value.type_id == TYPE_STR
                 && let Some(Node::String(v)) = &value.v
@@ -254,40 +214,26 @@ impl Completer {
                 }
             }
         }
-        let before = contain_index - 1;
-        let closest_before = if before >= 0 {
-            Some(result[before as usize])
+        let right_bound: usize = result.len();
+        let b1_i = node_index + 1;
+        let b1 = if b1_i < right_bound{
+            Some(result[b1_i])
         } else {
             None
         };
-        let after = (contain_index + 1) as usize;
-        let closest_after = if after < result.len() {
-            Some(result[after])
+        let b2_i = node_index + 2;
+        let b2 = if b2_i < right_bound{
+            Some(result[b2_i])
         } else {
             None
         };
-        *context.nodes.lock().await = (closest_before, containing_node, closest_after);
+        *context.nodes.lock().await = (node, b1, b2);
     }
 
-    fn get_content_index(&self, pos: &Position) -> Option<usize> {
-        let mut result = 0;
-        let line = pos.line as usize; //index from 0
-        if line >= self.line_cache.len() {
-            return None;
-        }
-        let index = pos.character as usize;
-        let forward = &self.line_cache[0..line];
-
-        for i in forward {
-            result += i.chars().count();
-        }
-        result = result + index + (line - 1) - 1;
-        Some(result)
-    }
-
-    fn get_boundary_indices(&self, index: usize) -> Option<(usize, usize)> {
+    async fn get_boundary_indices(&self, index: usize) -> Option<(usize, usize)> {
         let mut stack: VecDeque<char> = VecDeque::new();
-        let (forward, backward) = self.content_cache.split_at(index);
+        let content = self.document.content_cache.lock().await;
+        let (forward, backward) = content.split_at(index);
         if forward.is_empty() || backward.is_empty() {
             return None;
         }
@@ -350,8 +296,8 @@ impl Completer {
         let pos = &param.text_document_position.position;
 
         let context: CompleteContext = CompleteContext::empty();
-        let index = self.get_content_index(pos);
-        let mut index_value = 0;
+        let index = self.document.get_content_index(pos).await;
+        let index_value;
         if let Some(index_v) = index {
             *context.index.lock().await = index_v;
             index_value = index_v;
@@ -359,16 +305,27 @@ impl Completer {
             return None;
         }
 
+        {
+            let input_char_index = index_value - 1;
+            let content = self.document.content_cache.lock().await;
+            if input_char_index > 0
+                && let Some(cr) = content.chars().nth(input_char_index)
+            {
+                *context.input_char.lock().await = cr;
+            }
+        }
+
         let cache_miss = {
             let ast = self.ast.lock().await;
             if let Some(ast) = ast.as_ref() {
-                ast.iter().all(|f| f.l > index_value && f.r < index_value)
+                !ast.iter().any(|f| f.l <= index_value && index_value <= f.r)
             } else {
                 true
             }
         };
 
         if cache_miss {
+            debug!("rebuild ast");
             self.build_ast(index_value, &context).await;
         }
 
@@ -393,7 +350,7 @@ impl Completer {
             return None;
         }
 
-        self.create_completion_information(&context)
+        self.create_completion_information(param, &context, &bk.jsonui_define_map)
     }
 
     async fn fill_control_type(
@@ -427,17 +384,35 @@ impl Completer {
 
     fn create_completion_information(
         &self,
+        param: &CompletionParams,
         context: &CompleteContext,
+        define_map: &HashMap<String, Vec<serde_json::Value>>,
     ) -> Option<Vec<CompletionItem>> {
         debug!("{:?}", context);
         None
     }
 
+    pub async fn update_ast(&self) {
+        let mut ast = self.ast.lock().await;
+        if ast.is_some() {
+            *ast = None
+        }
+    }
+
+    pub async fn update_document(&self, request: &DidChangeTextDocumentParams) {
+        self.document.apply_change(request).await;
+    }
+
     async fn build_ast<'a>(&self, index: usize, context: &'a CompleteContext<'a>) {
-        let indices = self.get_boundary_indices(index);
+        let indices = self.get_boundary_indices(index).await;
         if let Some((l, r)) = indices {
-            let splice_control = &self.content_cache[l..r + 1];
-            let mut peekable = splice_control.chars().peekable().enumerate();
+            let content = self.document.content_cache.lock().await;
+            let splice_control = &content[l..r + 1];
+            let mut peekable = splice_control
+                .chars()
+                .enumerate()
+                .map(|(i, c)| (i + l, c))
+                .peekable();
             let mut stack: VecDeque<Value> = VecDeque::new();
             let mut str_builder = String::new();
 
@@ -473,6 +448,20 @@ impl Completer {
             *self.ast.lock().await = Some(stack.into_iter().collect());
             *context.l.lock().await = l;
             *context.r.lock().await = r;
+        }
+    }
+
+    fn flatten_ast<'a>(input: &'a [Value], result: &mut Vec<&'a Value>) {
+        for i in input {
+            if let Some(v) = &i.v {
+                result.push(i);
+                match v {
+                    Node::Array(sub) | Node::Controls(sub) => {
+                        Self::flatten_ast(sub, result);
+                    }
+                    _ => {}
+                }
+            }
         }
     }
 
@@ -537,13 +526,6 @@ impl Completer {
     }
 
     fn handle_comma(stack: &mut VecDeque<Value>, str_builder: &mut String, index: usize) {
-        stack.push_back(Value {
-            l: index,
-            r: index + 1,
-            type_id: TYPE_COM,
-            v: Some(Node::Comma),
-        });
-
         if !str_builder.is_empty() {
             let str_c = str_builder.len();
             if let Ok(boolean) = str_builder.parse::<bool>() {
@@ -563,6 +545,13 @@ impl Completer {
             }
             str_builder.clear();
         }
+
+        stack.push_back(Value {
+            l: index,
+            r: index + 1,
+            type_id: TYPE_COM,
+            v: Some(Node::Comma),
+        });
     }
 }
 
@@ -570,117 +559,85 @@ impl Completer {
 mod tests {
     use super::*;
 
-    const EXAMPLE1: &'static str = r#"{
-                    "text@cc.l": {
-                      "$button_text_font_scale_factor|default": 1,
-                      "$button_text_bindings|default": [],
-                      "font_scale_factor": "$button_text_font_scale_factor",
-                      "anchor_from": "$button_text_anchor",
-                      "anchor_to": "$button_text_anchor",
-                      "bindings": "$button_text_bindings",
-                      "shadow": "$button_text_shadow",
-                      "offset": "$button_text_offset_holder",
-                      "layer": 3,
-                      "color": "$button_text_color",
-                      "text": "$button_text"
-                    }
-                  }"#;
+    const EXAMPLE1: &'static str = include_str!("../test/achievement_screen.json");
 
-    #[test]
-    fn test_get_content_index() {
+    #[tokio::test]
+    async fn test_get_content_index() {
         let completer = Completer::from(EXAMPLE1.into());
-        let index = completer.get_content_index(&Position {
-            line: 2,
-            character: 25,
-        });
-        let result = completer.content_cache.chars().nth(index.unwrap());
-        assert_eq!(result, Some('$'));
+        let index = completer
+            .document
+            .get_content_index(&Position {
+                line: 16,
+                character: 12,
+            })
+            .await;
+        let docu = completer.document.content_cache.lock().await;
+        let result = docu.chars().nth(index.unwrap());
+        assert_eq!(result, Some(':'));
     }
 
-    #[test]
-    fn test_get_content_index_2() {
+    #[tokio::test]
+    async fn test_get_content_index_error() {
         let completer = Completer::from(EXAMPLE1.into());
-        let index = completer.get_content_index(&Position {
-            line: 13,
-            character: 22,
-        });
-        let result = completer.content_cache.chars().nth(index.unwrap());
-        assert_eq!(result, Some('}'));
+        let result = completer
+            .document
+            .get_content_index(&Position {
+                line: 15,
+                character: 1,
+            })
+            .await;
+        assert_eq!(result, None);
     }
-
-    #[test]
-    fn test_get_content_index_3() {
+    #[tokio::test]
+    async fn test_get_content_index_error_2() {
         let completer = Completer::from(EXAMPLE1.into());
-        let index = completer.get_content_index(&Position {
-            line: 12,
-            character: 45,
-        });
-        let result = completer.content_cache.chars().nth(index.unwrap());
-        assert_eq!(result, Some('"'));
-    }
-
-    #[test]
-    fn test_get_content_index_4() {
-        let completer = Completer::from(EXAMPLE1.into());
-        let index = completer.get_content_index(&Position {
-            line: 14,
-            character: 20,
-        });
-        let result = completer.content_cache.chars().nth(index.unwrap());
-        assert_eq!(result, Some('}'));
-    }
-
-    #[test]
-    fn test_get_content_index_error() {
-        let completer = Completer::from(EXAMPLE1.into());
-        let result = completer.get_content_index(&Position {
-            line: 15,
-            character: 1,
-        });
+        let index = completer
+            .document
+            .get_content_index(&Position {
+                line: 14,
+                character: 21,
+            })
+            .await;
+        let docu = completer.document.content_cache.lock().await;
+        let result = docu.chars().nth(index.unwrap());
         assert_eq!(result, None);
     }
 
-    #[test]
-    fn test_get_content_index_error_2() {
-        let completer = Completer::from(EXAMPLE1.into());
-        let index = completer.get_content_index(&Position {
-            line: 14,
-            character: 21,
-        });
-        let result = completer.content_cache.chars().nth(index.unwrap());
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn test_get_boundary_indices() {
+    #[tokio::test]
+    async fn test_get_boundary_indices() {
         let completer = Completer::from(EXAMPLE1.into());
 
         let v: usize = completer
+            .document
             .get_content_index(&Position {
                 line: 2,
                 character: 25,
             })
+            .await
             .unwrap();
 
-        let result = completer.get_boundary_indices(v);
+        let result = completer.get_boundary_indices(v).await;
         let (l, r) = result.unwrap();
-        let lc = completer.content_cache.chars().nth(l).unwrap();
-        let rc = completer.content_cache.chars().nth(r).unwrap();
+        let docu = completer.document.content_cache.lock().await;
+        let lc = docu.chars().nth(l).unwrap();
+        let rc = docu.chars().nth(r).unwrap();
         assert_eq!((lc, rc), ('"', '}'));
     }
 
-    #[test]
-    fn test_get_boundary_indices_error() {
+    #[tokio::test]
+    async fn test_get_boundary_indices_error() {
         let completer = Completer::from(EXAMPLE1.into());
 
         let v = completer
+            .document
             .get_content_index(&Position {
                 line: 14,
                 character: 20,
             })
+            .await
             .unwrap();
 
-        let result = completer.get_boundary_indices(v);
+        let result = completer.get_boundary_indices(v).await;
         assert_eq!(result, None);
     }
 
@@ -689,10 +646,12 @@ mod tests {
         let completer = Completer::from(EXAMPLE1.into());
 
         let v = completer
+            .document
             .get_content_index(&Position {
                 line: 2,
                 character: 25,
             })
+            .await
             .unwrap();
         let mut context = &CompleteContext::empty();
         completer.build_ast(v, &mut context).await;
@@ -704,10 +663,12 @@ mod tests {
     async fn test_build_ast_error() {
         let completer = Completer::from(EXAMPLE1.into());
         let v = completer
+            .document
             .get_content_index(&Position {
                 line: 14,
                 character: 21,
             })
+            .await
             .unwrap();
 
         let mut context = &CompleteContext::empty();

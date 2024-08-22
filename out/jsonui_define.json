@@ -1,0 +1,32 @@
+{
+  "control_types": [
+    {
+        "label": "label",
+        "description": {
+            "zh": "文本控件",
+            "en": ""
+        },
+        "insert_text": "\"label\""
+    }
+  ],
+  "label": [
+    {
+        "label": "text",
+        "description": {
+            "zh": "定义文本控件显示的文字",
+            "en": ""
+        },
+        "insert_text": "\"text\""
+    }
+  ],
+  "label.text": [
+    {
+        "label": "value",
+        "description": {
+            "zh": "文本值",
+            "en": ""
+        },
+        "insert_text": "\"\""
+    }
+  ]
+}

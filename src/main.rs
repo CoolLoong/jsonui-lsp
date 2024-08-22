@@ -3,7 +3,7 @@
 use completion::Completer;
 use jsonc_parser::{parse_to_serde_value, ParseOptions};
 use log::{debug, set_max_level};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
@@ -16,8 +16,10 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 use walkdir::WalkDir;
 
 mod completion;
+mod document;
 
-const VANILLAPACK_DEFINE: &[u8] = include_bytes!("../out/vanillapack_define_1.21.20.3.json");
+const VANILLAPACK_DEFINE: &'static str = include_str!("../out/vanillapack_define_1.21.20.3.json");
+const JSONUI_DEFINE: &'static str = include_str!("../out/jsonui_define.json");
 const SEED: u64 = 32;
 
 #[derive(Debug)]
@@ -26,6 +28,7 @@ struct Backend {
     completers: Mutex<HashMap<u64, Completer>>,
     /// cache namespace -> control_name -> control_type
     cache_type_map: Mutex<HashMap<String, HashMap<String, String>>>,
+    jsonui_define_map: HashMap<String, Vec<Value>>,
     /// cache url -> namespace
     id_2_namespace_map: Mutex<HashMap<u64, Arc<str>>>,
 }
@@ -62,7 +65,6 @@ fn hash_uri(url: &Url) -> u64 {
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
-        //like {"settings":{"log":{"level":"off"}}}
         if let Some(v) = params.settings.get("log").unwrap().get("level") {
             self.client
                 .log_message(MessageType::INFO, format!("set config level is {}", v))
@@ -190,7 +192,7 @@ impl LanguageServer for Backend {
         }
         debug!("open new file");
 
-        let content = params.text_document.text.as_str();
+        let content: String = params.text_document.text.as_str().chars().collect();
         let arc_content: Arc<str> = Arc::from(content);
 
         let url = &params.text_document.uri;
@@ -203,7 +205,15 @@ impl LanguageServer for Backend {
     }
 
     // trigger in file change
-    async fn did_change(&self, _: DidChangeTextDocumentParams) {}
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        let url = &params.text_document.uri;
+        let key = hash_uri(url);
+        let cmp_map = self.completers.lock().await;
+        if let Some(cmp) = cmp_map.get(&key) {
+            cmp.update_document(&params).await;
+            cmp.update_ast().await;
+        }
+    }
 
     /// do insert namespace and cache_type map for save file
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
@@ -342,7 +352,7 @@ impl Backend {
         }
     }
 
-    async fn query_type(&self, namespace: Arc<str>, control_n: Arc<str>) -> Option<String>{
+    async fn query_type(&self, namespace: Arc<str>, control_n: Arc<str>) -> Option<String> {
         let v = self.cache_type_map.lock().await;
         let map = v.get(namespace.as_ref());
         if let Some(map_v) = map {
@@ -465,10 +475,9 @@ impl Backend {
 async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
-
     env_logger::init();
 
-    let json_value: Value = serde_json::from_slice(VANILLAPACK_DEFINE).unwrap();
+    let json_value: Value = serde_json::from_str(VANILLAPACK_DEFINE).unwrap();
     let cache_type_map: HashMap<String, HashMap<String, String>> = json_value
         .as_object()
         .unwrap()
@@ -488,10 +497,23 @@ async fn main() {
             (key.to_string(), inner_map)
         })
         .collect();
+
+    let jsonui_define: Value = serde_json::from_str(JSONUI_DEFINE).unwrap();
+    let obj = jsonui_define.as_object().ok_or("Expected a JSON object").unwrap();
+    let mut jsonui_define_map: HashMap<String, Vec<Value>> = HashMap::new();
+    for (key, value) in obj {
+        let vec = match value {
+            Value::Array(arr) => arr.clone(),
+            _ => vec![value.clone()],
+        };
+        jsonui_define_map.insert(key.to_string(), vec);
+    }
+
     let (service, socket) = LspService::build(|client| Backend {
         client,
         completers: Mutex::new(HashMap::new()),
         cache_type_map: Mutex::new(cache_type_map),
+        jsonui_define_map,
         id_2_namespace_map: Mutex::new(HashMap::new()),
     })
     .finish();

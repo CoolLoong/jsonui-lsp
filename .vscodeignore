@@ -6,3 +6,4 @@ tsconfig.json
 webpack.config.js
 client/**
 target
+test/
