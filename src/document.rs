@@ -20,9 +20,9 @@ pub struct LineInfo {
 impl Document {
     pub fn from(str: &String) -> Self {
         let content: String = str.chars().collect();
-        let content_chars: Vec<Arc<str>> = content.graphemes(true).map(|f| Arc::from(f)).collect();
+        let content_chars: Vec<Arc<str>> = content.graphemes(true).map(Arc::from).collect();
         Self {
-            line_info_cache: Self::init_line_info_cache(&str),
+            line_info_cache: Self::init_line_info_cache(str),
             content_cache: Mutex::new(content),
             content_chars: Mutex::new(content_chars)
         }
@@ -52,7 +52,7 @@ impl Document {
         };
         let mut result: Vec<Arc<str>> = Vec::new();
         result.extend_from_slice(before);
-        result.append(&mut replacement.graphemes(true).map(|f| Arc::from(f)).collect::<Vec<Arc<str>>>());
+        result.append(&mut replacement.graphemes(true).map(Arc::from).collect::<Vec<Arc<str>>>());
         result.extend_from_slice(after);
 
         let mut content = self.content_cache.lock().await;
@@ -64,8 +64,8 @@ impl Document {
         let mut line_info_table = Vec::new();
         let mut start_index = 0;
         let mut char_count = 0;
-        let mut chars = content.graphemes(true).peekable();
-        while let Some(c) = chars.next() {
+        let chars = content.graphemes(true).peekable();
+        for c in chars {
             char_count += 1;
             if c == "\n" || c == "\r\n" {
                 line_info_table.push(LineInfo {
@@ -137,7 +137,7 @@ mod tests {
 
     use super::*;
 
-    const EXAMPLE1: &'static str = include_str!("../test/achievement_screen.json");
+    const EXAMPLE1: &str = include_str!("../test/achievement_screen.json");
 
     #[tokio::test]
     async fn test_apply_change() {

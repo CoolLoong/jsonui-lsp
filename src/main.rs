@@ -3,11 +3,10 @@
 use completion::Completer;
 use flexi_logger::{LogSpecification, Logger, LoggerHandle};
 use jsonc_parser::{parse_to_serde_value, ParseOptions};
-use log::{debug, set_max_level, trace, LevelFilter};
+use log::{debug, set_max_level, trace};
 use serde_json::{Map, Value};
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::fmt::Debug;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,8 +19,8 @@ use walkdir::WalkDir;
 mod completion;
 mod document;
 
-const VANILLAPACK_DEFINE: &'static str = include_str!("../out/vanillapack_define_1.21.20.3.json");
-const JSONUI_DEFINE: &'static str = include_str!("../out/jsonui_define.json");
+const VANILLAPACK_DEFINE: &str = include_str!("../out/vanillapack_define_1.21.20.3.json");
+const JSONUI_DEFINE: &str = include_str!("../out/jsonui_define.json");
 const SEED: u64 = 32;
 
 struct Backend {
@@ -47,13 +46,11 @@ fn get_namespace(s: &Arc<str>) -> Option<String> {
     let mut crs = s.chars().peekable();
 
     while let Some(ch) = crs.next() {
-        if ch == '"' {
-            if NAMESPACE.chars().all(|c| Some(c) == crs.next()) {
-                let mut skip_w = crs.skip_while(|&c| c != '"');
-                skip_w.next();
-                let result: String = skip_w.take_while(|&c| c != '"').collect();
-                return Some(result);
-            }
+        if ch == '"' && NAMESPACE.chars().all(|c| Some(c) == crs.next()) {
+            let mut skip_w = crs.skip_while(|&c| c != '"');
+            skip_w.next();
+            let result: String = skip_w.take_while(|&c| c != '"').collect();
+            return Some(result);
         }
     }
     None
@@ -284,7 +281,7 @@ impl LanguageServer for Backend {
 
         let cmp_v = cmp.get(&hash_value);
         if let Some(vv) = cmp_v {
-            if let Some(result) = vv.compelte(&self, &params).await{
+            if let Some(result) = vv.compelte(self, &params).await{
                 return Ok(Some(CompletionResponse::Array(result)));
             } 
         }
@@ -333,7 +330,7 @@ impl Backend {
     async fn insert_namespace_by_content(&self, url: &Url, content: &Arc<str>) {
         let hash_value = hash_uri(url);
 
-        let namespace_op = get_namespace(&content);
+        let namespace_op = get_namespace(content);
         if let Some(v) = namespace_op {
             let mut idmap = self.id_2_namespace_map.lock().await;
             idmap.entry(hash_value).or_insert(Arc::from(v));
@@ -349,11 +346,7 @@ impl Backend {
     async fn query_namespace(&self, url: &Url) -> Option<Arc<str>> {
         let hash_value = hash_uri(url);
         let idmap = self.id_2_namespace_map.lock().await;
-        if let Some(v) = idmap.get(&hash_value) {
-            Some(v.to_owned())
-        } else {
-            None
-        }
+        idmap.get(&hash_value).map(|v| v.to_owned())
     }
 
     async fn query_type(&self, namespace: Arc<str>, control_n: Arc<str>) -> Option<String> {
@@ -439,27 +432,25 @@ impl Backend {
                     if let Some(type_n) = type_n_option {
                         self.insert_control_type(namespace, part_name.to_string(), type_n)
                             .await;
-                    } else {
-                        if let Some(cache_v) = &temp_content_cache
-                            && let Some(namespace_object) = cache_v.get(namespace)
-                        {
-                            if let Some((_, vv)) = namespace_object.iter().find(|(kk, vv)| {
-                                if let Value::Object(_) = vv {
-                                    extract_prefix(kk) == part_name
-                                } else {
-                                    false
-                                }
-                            }) {
-                                if let Value::Object(obj) = vv {
-                                    let next = control_name.or(Some(prefix.unwrap()));
-                                    Box::pin(self.process_workspace_file(
-                                        temp_content_cache.clone(),
-                                        namespace,
-                                        next,
-                                        obj,
-                                    ))
-                                    .await;
-                                }
+                    } else if let Some(cache_v) = &temp_content_cache
+                        && let Some(namespace_object) = cache_v.get(namespace)
+                    {
+                        if let Some((_, vv)) = namespace_object.iter().find(|(kk, vv)| {
+                            if let Value::Object(_) = vv {
+                                extract_prefix(kk) == part_name
+                            } else {
+                                false
+                            }
+                        }) {
+                            if let Value::Object(obj) = vv {
+                                let next = control_name.or(Some(prefix.unwrap()));
+                                Box::pin(self.process_workspace_file(
+                                    temp_content_cache,
+                                    namespace,
+                                    next,
+                                    obj,
+                                ))
+                                .await;
                             }
                         }
                     }

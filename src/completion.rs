@@ -1,9 +1,7 @@
 use crate::document::Document;
 use crate::Backend;
 use log::{debug, trace};
-use serde_json::json;
 use std::{
-    borrow::Borrow,
     collections::{HashMap, VecDeque},
     fmt,
     sync::Arc,
@@ -14,7 +12,6 @@ use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemLabelDetails, CompletionParams, DidChangeTextDocumentParams,
     Documentation, MarkupContent,
 };
-use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
@@ -85,17 +82,17 @@ impl fmt::Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Node::Controls(controls) => {
-                write!(f, "{{\n")?;
+                writeln!(f, "{{")?;
                 for (i, control) in controls.iter().enumerate() {
                     if i > 0 {
-                        write!(f, ", \n")?;
+                        writeln!(f, ", ")?;
                     }
                     write!(f, "{:?}", control)?;
                 }
                 write!(f, "\n}}")
             }
             Node::Array(array) => {
-                write!(f, "[\n")?;
+                writeln!(f, "[")?;
                 for (i, item) in array.iter().enumerate() {
                     if i > 0 {
                         write!(f, ", ")?;
@@ -145,9 +142,9 @@ impl From<&str> for Token {
     }
 }
 
-impl Into<char> for Token {
-    fn into(self) -> char {
-        self as u8 as char
+impl From<Token> for char {
+    fn from(val: Token) -> Self {
+        val as u8 as char
     }
 }
 
@@ -203,10 +200,27 @@ impl Completer {
         let mut node_index: usize = 0;
         for (index, value) in result.iter().enumerate() {
             if value.r < v_index {
+                trace!("get left node {} {:?}", index, value);
                 node = Some(value);
                 node_index = index;
             }
         }
+        
+        //get neighbors node
+        let right_bound: usize = result.len();
+        let b1_i = node_index + 1;
+        let b1 = if b1_i < right_bound {
+            Some(result[b1_i])
+        } else {
+            None
+        };
+        let b2_i = node_index + 2;
+        let b2 = if b2_i < right_bound {
+            Some(result[b2_i])
+        } else {
+            None
+        };
+        *context.nodes.lock().await = (node, b1, b2);
 
         //find control_type by context
         result.clear();
@@ -226,22 +240,6 @@ impl Completer {
                 }
             }
         }
-
-        //get neighbors node
-        let right_bound: usize = result.len();
-        let b1_i = node_index + 1;
-        let b1 = if b1_i < right_bound {
-            Some(result[b1_i])
-        } else {
-            None
-        };
-        let b2_i = node_index + 2;
-        let b2 = if b2_i < right_bound {
-            Some(result[b2_i])
-        } else {
-            None
-        };
-        *context.nodes.lock().await = (node, b1, b2);
     }
 
     async fn get_boundary_indices(&self, index: usize) -> Option<(usize, usize)> {
@@ -262,9 +260,7 @@ impl Completer {
                     let opt = forward_iter
                         .skip_while(|(_, c)| c.as_ref() != "\"")
                         .skip(1)
-                        .skip_while(|(_, c)| c.as_ref() != "\"")
-                        .skip(1)
-                        .next();
+                        .skip_while(|(_, c)| c.as_ref() != "\"").nth(1);
                     if let Some((index, _)) = opt {
                         start_index = Some(f_len - index);
                         break;
@@ -278,14 +274,12 @@ impl Completer {
                 stack.push_back(str);
             }
         }
-        if start_index.is_none() {
-            return None;
-        }
+        start_index?;
 
         stack.clear();
         let mut end_index: Option<usize> = None;
-        let mut backend_iter = backward.iter().peekable().enumerate();
-        while let Some((index, ch)) = backend_iter.next() {
+        let backend_iter = backward.iter().peekable().enumerate();
+        for (index, ch) in backend_iter {
             let str = ch.as_ref();
             if str == "}" {
                 if stack.is_empty() {
@@ -298,9 +292,7 @@ impl Completer {
                 stack.push_back(str);
             }
         }
-        if end_index.is_none() {
-            return None;
-        }
+        end_index?;
 
         Some((start_index.unwrap(), end_index.unwrap()))
     }
@@ -463,8 +455,8 @@ impl Completer {
 
             let mut stack: VecDeque<Value> = VecDeque::new();
             let mut str_builder = String::new();
-            let mut iter = splice_control.iter().enumerate();
-            while let Some((index, c)) = iter.next() {
+            let iter = splice_control.iter().enumerate();
+            for (index, c) in iter {
                 let i = index + l;
                 let str = c.as_ref();
                 match str.into() {
@@ -543,19 +535,17 @@ impl Completer {
                 type_id: TYPE_STR,
                 v: None,
             });
-        } else {
-            if let Some(value) = stack.pop_back()
-                && TYPE_STR == value.type_id
-                && value.v.is_none()
-            {
-                stack.push_back(Value {
-                    l: value.l,
-                    r: index + 1,
-                    type_id: TYPE_STR,
-                    v: Some(Node::String(Arc::from(str_builder.clone()))),
-                });
-                str_builder.clear();
-            }
+        } else if let Some(value) = stack.pop_back()
+            && TYPE_STR == value.type_id
+            && value.v.is_none()
+        {
+            stack.push_back(Value {
+                l: value.l,
+                r: index + 1,
+                type_id: TYPE_STR,
+                v: Some(Node::String(Arc::from(str_builder.clone()))),
+            });
+            str_builder.clear();
         }
     }
 
@@ -631,7 +621,7 @@ mod tests {
 
     use super::*;
 
-    const EXAMPLE1: &'static str = include_str!("../test/achievement_screen.json");
+    const EXAMPLE1: &str = include_str!("../test/achievement_screen.json");
 
     #[tokio::test]
     async fn test_get_content_index() {
@@ -700,8 +690,8 @@ mod tests {
             })
             .await
             .unwrap();
-        let mut context = &CompleteContext::empty();
-        completer.build_ast(v, &mut context).await;
+        let context = &CompleteContext::empty();
+        completer.build_ast(v, context).await;
         {
             let result = completer.ast.lock().await;
             assert!(result.is_some());
@@ -717,8 +707,8 @@ mod tests {
             .unwrap();
 
         let completer = Completer::from(EXAMPLE1.into());
-        let mut context = &CompleteContext::empty();
-        completer.build_ast(v, &mut context).await;
+        let context = &CompleteContext::empty();
+        completer.build_ast(v, context).await;
         let result = completer.ast.lock().await;
         assert!(result.is_none());
     }
