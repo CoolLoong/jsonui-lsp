@@ -1,11 +1,13 @@
 #![feature(let_chains)]
 
 use completion::Completer;
+use flexi_logger::{LogSpecification, Logger, LoggerHandle};
 use jsonc_parser::{parse_to_serde_value, ParseOptions};
-use log::{debug, set_max_level};
-use serde_json::{json, Map, Value};
+use log::{debug, set_max_level, trace, LevelFilter};
+use serde_json::{Map, Value};
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -22,9 +24,9 @@ const VANILLAPACK_DEFINE: &'static str = include_str!("../out/vanillapack_define
 const JSONUI_DEFINE: &'static str = include_str!("../out/jsonui_define.json");
 const SEED: u64 = 32;
 
-#[derive(Debug)]
 struct Backend {
     client: Client,
+    log: Arc<LoggerHandle>,
     completers: Mutex<HashMap<u64, Completer>>,
     /// cache namespace -> control_name -> control_type
     cache_type_map: Mutex<HashMap<String, HashMap<String, String>>>,
@@ -102,13 +104,13 @@ impl LanguageServer for Backend {
                 .await;
             match v.as_str().unwrap() {
                 "off" => {
-                    set_max_level(log::LevelFilter::Off);
+                    self.log.set_new_spec(LogSpecification::off());
                 }
                 "messages" => {
-                    set_max_level(log::LevelFilter::Error);
+                    self.log.set_new_spec(LogSpecification::error());
                 }
                 "verbose" => {
-                    set_max_level(log::LevelFilter::Trace);
+                    self.log.set_new_spec(LogSpecification::trace());
                 }
                 _ => {}
             }
@@ -217,7 +219,7 @@ impl LanguageServer for Backend {
 
     /// do insert namespace and cache_type map for save file
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
-        debug!("did_save {}", &params.text_document.uri);
+        trace!("did_save {}", &params.text_document.uri.path());
         self.process_workspace_file_by_url(&params.text_document.uri)
             .await;
     }
@@ -282,7 +284,9 @@ impl LanguageServer for Backend {
 
         let cmp_v = cmp.get(&hash_value);
         if let Some(vv) = cmp_v {
-            vv.compelte(&self, &params).await;
+            if let Some(result) = vv.compelte(&self, &params).await{
+                return Ok(Some(CompletionResponse::Array(result)));
+            } 
         }
         Ok(None)
     }
@@ -475,7 +479,7 @@ impl Backend {
 async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
-    env_logger::init();
+    let log: flexi_logger::LoggerHandle = Logger::with(LogSpecification::info()).start().unwrap();
 
     let json_value: Value = serde_json::from_str(VANILLAPACK_DEFINE).unwrap();
     let cache_type_map: HashMap<String, HashMap<String, String>> = json_value
@@ -511,6 +515,7 @@ async fn main() {
 
     let (service, socket) = LspService::build(|client| Backend {
         client,
+        log: Arc::new(log),
         completers: Mutex::new(HashMap::new()),
         cache_type_map: Mutex::new(cache_type_map),
         jsonui_define_map,

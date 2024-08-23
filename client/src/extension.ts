@@ -38,8 +38,7 @@ export async function activate(context: ExtensionContext) {
     command,
     options: {
       env: {
-        ...process.env,
-        RUST_LOG: "debug",
+        ...process.env
       },
     },
   };

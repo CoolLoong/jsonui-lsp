@@ -1,17 +1,20 @@
 use crate::document::Document;
 use crate::Backend;
-use log::{debug, error};
+use log::{debug, trace};
+use serde_json::json;
 use std::{
+    borrow::Borrow,
     collections::{HashMap, VecDeque},
     fmt,
-    hash::Hash,
-    io::{BufReader, Read},
     sync::Arc,
+    vec,
 };
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionParams, DidChangeTextDocumentParams, Position,
+    CompletionItem, CompletionItemLabelDetails, CompletionParams, DidChangeTextDocumentParams,
+    Documentation, MarkupContent,
 };
+use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
@@ -127,16 +130,16 @@ impl PartialEq for Node {
     }
 }
 
-impl From<char> for Token {
-    fn from(value: char) -> Self {
+impl From<&str> for Token {
+    fn from(value: &str) -> Self {
         match value {
-            '{' => Token::LeftBrace,
-            '}' => Token::RightBrace,
-            '[' => Token::LeftBracket,
-            ']' => Token::RightBracket,
-            ',' => Token::Comma,
-            ':' => Token::Colon,
-            '"' => Token::Quote,
+            "{" => Token::LeftBrace,
+            "}" => Token::RightBrace,
+            "[" => Token::LeftBracket,
+            "]" => Token::RightBracket,
+            "," => Token::Comma,
+            ":" => Token::Colon,
+            "\"" => Token::Quote,
             _ => Token::OTHER,
         }
     }
@@ -149,8 +152,8 @@ impl Into<char> for Token {
 }
 
 impl Token {
-    pub fn is_ignore(c: &char) -> bool {
-        matches!(c, ' ' | '\n')
+    pub fn is_ignore(c: &str) -> bool {
+        matches!(c, " " | "\r\n" | "\n")
     }
 }
 
@@ -191,7 +194,8 @@ impl Completer {
         }
     }
 
-    async fn find_closest_node<'a>(input: &'a [Value], context: &'a CompleteContext<'a>) {
+    async fn fill_context<'a>(input: &'a [Value], context: &'a CompleteContext<'a>) {
+        //find the neighbors node corresponding to the current index 
         let mut result = Vec::new();
         Self::flatten_ast(input, &mut result);
         let v_index = *context.index.lock().await;
@@ -202,27 +206,37 @@ impl Completer {
                 node = Some(value);
                 node_index = index;
             }
-            if value.type_id == TYPE_STR
-                && let Some(Node::String(v)) = &value.v
+        }
+
+        //find control_type by context
+        result.clear();
+        Self::flatten_ast_one_layer(input, &mut result);
+        for (index, i) in result.iter().enumerate() {
+            trace!("try find type from index {} context {:?}", index, i);
+            if i.type_id == TYPE_STR
+                && let Some(Node::String(v)) = &i.v
                 && v.as_ref() == "type"
             {
                 let type_node_index = index + 2;
                 if type_node_index < result.len()
                     && let Some(Node::String(type_v)) = &result[type_node_index].v
                 {
+                    trace!("find type {} from context {:?}", type_v, i);
                     *context.control_type.lock().await = Some(type_v.clone());
                 }
             }
         }
+
+        //get neighbors node
         let right_bound: usize = result.len();
         let b1_i = node_index + 1;
-        let b1 = if b1_i < right_bound{
+        let b1 = if b1_i < right_bound {
             Some(result[b1_i])
         } else {
             None
         };
         let b2_i = node_index + 2;
-        let b2 = if b2_i < right_bound{
+        let b2 = if b2_i < right_bound {
             Some(result[b2_i])
         } else {
             None
@@ -231,22 +245,24 @@ impl Completer {
     }
 
     async fn get_boundary_indices(&self, index: usize) -> Option<(usize, usize)> {
-        let mut stack: VecDeque<char> = VecDeque::new();
-        let content = self.document.content_cache.lock().await;
+        let content = self.document.content_chars.lock().await;
         let (forward, backward) = content.split_at(index);
         if forward.is_empty() || backward.is_empty() {
             return None;
         }
-        let f_len = forward.chars().count();
+
+        let f_len = forward.len();
+        let mut stack: VecDeque<&str> = VecDeque::new();
         let mut start_index: Option<usize> = None;
-        let mut forward_iter = forward.chars().rev().peekable().enumerate();
+        let mut forward_iter = forward.iter().rev().peekable().enumerate();
         while let Some((_, ch)) = forward_iter.next() {
-            if ch == '{' {
+            let str = ch.as_ref();
+            if str == "{" {
                 if stack.is_empty() {
                     let opt = forward_iter
-                        .skip_while(|(_, c)| *c != '"')
+                        .skip_while(|(_, c)| c.as_ref() != "\"")
                         .skip(1)
-                        .skip_while(|(_, c)| *c != '"')
+                        .skip_while(|(_, c)| c.as_ref() != "\"")
                         .skip(1)
                         .next();
                     if let Some((index, _)) = opt {
@@ -258,8 +274,8 @@ impl Completer {
                 } else {
                     stack.pop_back();
                 }
-            } else if ch == '}' {
-                stack.push_back(ch);
+            } else if str == "}" {
+                stack.push_back(str);
             }
         }
         if start_index.is_none() {
@@ -268,17 +284,18 @@ impl Completer {
 
         stack.clear();
         let mut end_index: Option<usize> = None;
-        let mut backend_iter = backward.chars().peekable().enumerate();
+        let mut backend_iter = backward.iter().peekable().enumerate();
         while let Some((index, ch)) = backend_iter.next() {
-            if ch == '}' {
+            let str = ch.as_ref();
+            if str == "}" {
                 if stack.is_empty() {
                     end_index = Some(index + f_len);
                     break;
                 } else {
                     stack.pop_back();
                 }
-            } else if ch == '{' {
-                stack.push_back(ch);
+            } else if str == "{" {
+                stack.push_back(str);
             }
         }
         if end_index.is_none() {
@@ -295,6 +312,7 @@ impl Completer {
     ) -> Option<Vec<CompletionItem>> {
         let pos = &param.text_document_position.position;
 
+        // get current index in content
         let context: CompleteContext = CompleteContext::empty();
         let index = self.document.get_content_index(pos).await;
         let index_value;
@@ -305,6 +323,7 @@ impl Completer {
             return None;
         }
 
+        //write the input char currently
         {
             let input_char_index = index_value - 1;
             let content = self.document.content_cache.lock().await;
@@ -315,6 +334,7 @@ impl Completer {
             }
         }
 
+        //check ast whether dirty 
         let cache_miss = {
             let ast = self.ast.lock().await;
             if let Some(ast) = ast.as_ref() {
@@ -323,15 +343,14 @@ impl Completer {
                 true
             }
         };
-
         if cache_miss {
-            debug!("rebuild ast");
             self.build_ast(index_value, &context).await;
         }
 
+        //fill context from ast
         let ast = self.ast.lock().await;
         if let Some(input) = ast.as_ref() {
-            Self::find_closest_node(input, &context).await;
+            Self::fill_context(input, &context).await;
             let mut control_type_mut = context.control_type.lock().await;
             if control_type_mut.is_none()
                 && let Some(Node::String(v)) = &input[0].v
@@ -340,9 +359,10 @@ impl Completer {
                 let namespace: Option<Arc<str>> = bk.query_namespace(url).await;
                 let control_t = self.fill_control_type(bk, namespace, v).await;
                 if let Some(v) = control_t {
+                    trace!("find type from type_cache {:?}", &input[0].v);
                     *control_type_mut = Some(Arc::from(v.as_str()));
-                }
-                {
+                } else {
+                    trace!("cant find type from type_cache {:?}", &input[0].v);
                     return None;
                 }
             }
@@ -389,7 +409,39 @@ impl Completer {
         define_map: &HashMap<String, Vec<serde_json::Value>>,
     ) -> Option<Vec<CompletionItem>> {
         debug!("{:?}", context);
-        None
+
+        Some(vec![CompletionItem {
+            label: "test".to_string(),
+            label_details: Some(CompletionItemLabelDetails {
+                description: Some("test des".to_string()),
+                detail: Some("test detail".to_string()),
+            }),
+            kind: None,
+            detail: Some("test detail 2".to_string()),
+            documentation: Some(Documentation::MarkupContent(MarkupContent {
+                kind: tower_lsp::lsp_types::MarkupKind::Markdown,
+                value: r#"我展示的是一级标题
+=================
+
+我展示的是二级标题
+-----------------"#
+                    .to_string(),
+            })),
+            deprecated: None,
+            preselect: None,
+            sort_text: None,
+            filter_text: None,
+            insert_text: Some("test".to_string()),
+            insert_text_format: None,
+            insert_text_mode: None,
+            text_edit: None,
+            additional_text_edits: None,
+            command: None,
+            commit_characters: None,
+            data: None,
+            tags: None,
+        }])
+        // None
     }
 
     pub async fn update_ast(&self) {
@@ -406,48 +458,52 @@ impl Completer {
     async fn build_ast<'a>(&self, index: usize, context: &'a CompleteContext<'a>) {
         let indices = self.get_boundary_indices(index).await;
         if let Some((l, r)) = indices {
-            let content = self.document.content_cache.lock().await;
-            let splice_control = &content[l..r + 1];
-            let mut peekable = splice_control
-                .chars()
-                .enumerate()
-                .map(|(i, c)| (i + l, c))
-                .peekable();
+            let chars = self.document.content_chars.lock().await;
+            let splice_control = &chars[l..r + 1];
+
             let mut stack: VecDeque<Value> = VecDeque::new();
             let mut str_builder = String::new();
-
-            while let Some((index, c)) = peekable.next() {
-                match c.into() {
-                    Token::Quote => Self::handle_quote(&mut stack, &mut str_builder, index),
+            let mut iter = splice_control.iter().enumerate();
+            while let Some((index, c)) = iter.next() {
+                let i = index + l;
+                let str = c.as_ref();
+                match str.into() {
+                    Token::Quote => Self::handle_quote(&mut stack, &mut str_builder, i),
                     Token::LeftBrace => stack.push_back(Value {
-                        l: index,
+                        l: i,
                         r: 0,
                         type_id: TYPE_CR,
                         v: None,
                     }),
                     Token::LeftBracket => stack.push_back(Value {
-                        l: index,
+                        l: i,
                         r: 0,
                         type_id: TYPE_ARR,
                         v: None,
                     }),
                     Token::Colon => stack.push_back(Value {
-                        l: index,
-                        r: index + 1,
+                        l: i,
+                        r: i + 1,
                         type_id: TYPE_COL,
                         v: Some(Node::Colon),
                     }),
-                    Token::RightBrace => Self::handle_right_brace(&mut stack, index),
-                    Token::RightBracket => Self::handle_right_bracket(&mut stack, index),
-                    Token::Comma => Self::handle_comma(&mut stack, &mut str_builder, index),
-                    Token::OTHER if Token::is_ignore(&c) => continue,
-                    Token::OTHER => str_builder.push(c),
+                    Token::RightBrace => Self::handle_right_brace(&mut stack, i),
+                    Token::RightBracket => Self::handle_right_bracket(&mut stack, i),
+                    Token::Comma => Self::handle_comma(&mut stack, &mut str_builder, i),
+                    Token::OTHER if Token::is_ignore(str) => continue,
+                    Token::OTHER => str_builder.push_str(str),
                 }
             }
-
-            *self.ast.lock().await = Some(stack.into_iter().collect());
+            let ast_result: Vec<Value> = stack.into_iter().collect();
+            *self.ast.lock().await = if ast_result.is_empty() {
+                None
+            } else {
+                Some(ast_result)
+            };
             *context.l.lock().await = l;
             *context.r.lock().await = r;
+        } else {
+            debug!("build ast error");
         }
     }
 
@@ -465,8 +521,22 @@ impl Completer {
         }
     }
 
+    fn flatten_ast_one_layer<'a>(input: &'a [Value], result: &mut Vec<&'a Value>) {
+        for i in input {
+            if let Some(v) = &i.v {
+                result.push(i);
+                if let Node::Array(sub) | Node::Controls(sub) = v {
+                    for sub_value in sub {
+                        result.push(sub_value);
+                    }
+                }
+            }
+        }
+    }
+
     fn handle_quote(stack: &mut VecDeque<Value>, str_builder: &mut String, index: usize) {
         if !stack.iter().any(|f| TYPE_STR == f.type_id && f.v.is_none()) {
+            str_builder.clear();//remove potential comments 
             stack.push_back(Value {
                 l: index,
                 r: 0,
@@ -557,6 +627,8 @@ impl Completer {
 
 #[cfg(test)]
 mod tests {
+    use tower_lsp::lsp_types::Position;
+
     use super::*;
 
     const EXAMPLE1: &'static str = include_str!("../test/achievement_screen.json");
