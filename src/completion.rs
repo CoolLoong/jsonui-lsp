@@ -195,7 +195,7 @@ impl Completer {
     }
 
     async fn fill_context<'a>(input: &'a [Value], context: &'a CompleteContext<'a>) {
-        //find the neighbors node corresponding to the current index 
+        //find the neighbors node corresponding to the current index
         let mut result = Vec::new();
         Self::flatten_ast(input, &mut result);
         let v_index = *context.index.lock().await;
@@ -334,7 +334,7 @@ impl Completer {
             }
         }
 
-        //check ast whether dirty 
+        //check ast whether dirty
         let cache_miss = {
             let ast = self.ast.lock().await;
             if let Some(ast) = ast.as_ref() {
@@ -536,7 +536,7 @@ impl Completer {
 
     fn handle_quote(stack: &mut VecDeque<Value>, str_builder: &mut String, index: usize) {
         if !stack.iter().any(|f| TYPE_STR == f.type_id && f.v.is_none()) {
-            str_builder.clear();//remove potential comments 
+            str_builder.clear(); //remove potential comments
             stack.push_back(Value {
                 l: index,
                 r: 0,
@@ -636,42 +636,24 @@ mod tests {
     #[tokio::test]
     async fn test_get_content_index() {
         let completer = Completer::from(EXAMPLE1.into());
+        let docu = completer.document.content_cache.lock().await;
         let index = completer
             .document
             .get_content_index(&Position {
                 line: 16,
-                character: 12,
+                character: 5,
             })
             .await;
-        let docu = completer.document.content_cache.lock().await;
         let result = docu.chars().nth(index.unwrap());
-        assert_eq!(result, Some(':'));
-    }
+        assert_eq!(result, Some('t'));
 
-    #[tokio::test]
-    async fn test_get_content_index_error() {
-        let completer = Completer::from(EXAMPLE1.into());
         let result = completer
             .document
             .get_content_index(&Position {
-                line: 15,
+                line: 44,
                 character: 1,
             })
             .await;
-        assert_eq!(result, None);
-    }
-    #[tokio::test]
-    async fn test_get_content_index_error_2() {
-        let completer = Completer::from(EXAMPLE1.into());
-        let index = completer
-            .document
-            .get_content_index(&Position {
-                line: 14,
-                character: 21,
-            })
-            .await;
-        let docu = completer.document.content_cache.lock().await;
-        let result = docu.chars().nth(index.unwrap());
         assert_eq!(result, None);
     }
 
@@ -682,8 +664,8 @@ mod tests {
         let v: usize = completer
             .document
             .get_content_index(&Position {
-                line: 2,
-                character: 25,
+                line: 16,
+                character: 6,
             })
             .await
             .unwrap();
@@ -694,21 +676,15 @@ mod tests {
         let lc = docu.chars().nth(l).unwrap();
         let rc = docu.chars().nth(r).unwrap();
         assert_eq!((lc, rc), ('"', '}'));
-    }
-
-    #[tokio::test]
-    async fn test_get_boundary_indices_error() {
-        let completer = Completer::from(EXAMPLE1.into());
 
         let v = completer
             .document
             .get_content_index(&Position {
-                line: 14,
-                character: 20,
+                line: 6,
+                character: 3,
             })
             .await
             .unwrap();
-
         let result = completer.get_boundary_indices(v).await;
         assert_eq!(result, None);
     }
@@ -716,33 +692,31 @@ mod tests {
     #[tokio::test]
     async fn test_build_ast() {
         let completer = Completer::from(EXAMPLE1.into());
-
         let v = completer
             .document
             .get_content_index(&Position {
-                line: 2,
-                character: 25,
+                line: 16,
+                character: 5,
             })
             .await
             .unwrap();
         let mut context = &CompleteContext::empty();
         completer.build_ast(v, &mut context).await;
-        let result = completer.ast.lock().await;
-        assert!(result.is_some());
-    }
+        {
+            let result = completer.ast.lock().await;
+            assert!(result.is_some());
+        }
 
-    #[tokio::test]
-    async fn test_build_ast_error() {
-        let completer = Completer::from(EXAMPLE1.into());
         let v = completer
             .document
             .get_content_index(&Position {
-                line: 14,
-                character: 21,
+                line: 0,
+                character: 1,
             })
             .await
             .unwrap();
 
+        let completer = Completer::from(EXAMPLE1.into());
         let mut context = &CompleteContext::empty();
         completer.build_ast(v, &mut context).await;
         let result = completer.ast.lock().await;

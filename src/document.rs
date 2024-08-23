@@ -85,6 +85,7 @@ impl Document {
         line_info_table
     }
 
+    /// position line index start from 0
     pub async fn get_content_index(&self, pos: &Position) -> Option<usize> {
         let line = pos.line as usize; // Index starts from 0
         let line_cache = self.line_info_cache.lock().await;
