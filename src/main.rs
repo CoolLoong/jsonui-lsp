@@ -138,7 +138,7 @@ impl LanguageServer for Backend {
                 )),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
-                    trigger_characters: Some(vec!["\"".to_string(), ":".to_string()]),
+                    trigger_characters: Some(vec!["\"".to_string()]),
                     work_done_progress_options: Default::default(),
                     all_commit_characters: None,
                     completion_item: Some(CompletionOptionsCompletionItem {

@@ -6,7 +6,7 @@
             "zh": "文本控件",
             "en": ""
         },
-        "insert_text": "\"label\""
+        "insert_text": "label"
     }
   ],
   "label": [
@@ -16,7 +16,7 @@
             "zh": "定义文本控件显示的文字",
             "en": ""
         },
-        "insert_text": "\"text\""
+        "insert_text": "text"
     }
   ],
   "label.text": [

@@ -32,6 +32,15 @@ impl Document {
         Mutex::new(Self::build_line_info_cache(content))
     }
 
+    pub async fn get_char(&self, index: usize) -> Option<Arc<str>>{
+        let chars = self.content_chars.lock().await;
+        if index >= chars.len(){
+            None
+        }else{
+            Some(chars[index].clone())
+        }
+    }
+
     pub async fn replace_grapheme_range(
         &self,
         start_idx: usize,
@@ -227,11 +236,9 @@ mod tests {
         };
         document.apply_change(&request).await;
         let docs = document.content_cache.lock().await;
-        println!("{}",docs);
+        let crs = document.content_chars.lock().await;
         #[rustfmt::skip]
-        assert!(docs.contains(
-            r#""clip_pixelperfect": 
-  },"#));
+        assert!(docs.contains("\"clip_pixelperfect\": \r\n  },"));
     }
 
     #[tokio::test]
