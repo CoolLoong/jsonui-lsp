@@ -21,3 +21,9 @@ unicode-segmentation = "1.11.0"
 
 [workspace]
 members = ["vanillapack_define_gen"]
+
+[profile.release]
+opt-level = 3
+debug = false
+split-debuginfo = "unpacked"
+lto = true

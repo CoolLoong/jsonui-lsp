@@ -1,6 +1,7 @@
 {
   "name": "jsonui-support",
   "description": "jsonui support",
+  "publisher": "CoolLoong",
   "license": "MIT",
   "version": "0.0.1",
   "categories": [],
@@ -56,7 +57,7 @@
   ],
   "scripts": {
     "postinstall": "cd client && pnpm i",
-    "vscode:prepublish": "npm run esbuild-base -- --minify",
+    "vscode:prepublish": "",
     "test-compile": "tsc -p ./",
     "compile": "cross-env NODE_ENV=production tsc -b",
     "watch": "cross-env rimraf dist && tsc -b -w",
