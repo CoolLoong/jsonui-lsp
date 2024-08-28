@@ -1,6 +1,6 @@
 {
-	"name": "nrs-language-client",
-	"description": "VSCode part of a language server",
+	"name": "jsonui-support-client",
+	"description": "A VSCode extension providing intelligent code completion for Minecraft Bedrock JSON-UI.",
 	"license": "MIT",
 	"version": "0.0.1",
 	"engines": {

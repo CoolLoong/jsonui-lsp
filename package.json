@@ -5,6 +5,9 @@
   "version": "0.0.1",
   "categories": [],
   "keywords": [
+    "minecraft",
+    "bedrock",
+    "jsonui",
     "language-server",
     "tower-lsp"
   ],
