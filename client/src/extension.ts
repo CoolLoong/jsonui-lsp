@@ -1,35 +1,16 @@
 import {
-  CompletionItem,
-  CancellationToken,
-  commands,
-  CompletionItemProvider,
-  CompletionList,
   ExtensionContext,
-  Position,
-  ProviderResult,
-  Range,
-  Selection,
-  TextDocument,
-  Uri,
-  window,
   workspace,
-  CompletionContext,
-  languages,
-  OutputChannel,
+  env as vsenv,
 } from "vscode";
 import {
-  CompletionParams,
-  CompletionRegistrationOptions,
   Executable,
   LanguageClient,
   LanguageClientOptions,
-  ProtocolRequestType,
   ServerOptions,
 } from "vscode-languageclient/node";
 
 let client: LanguageClient;
-// type a = Parameters<>;
-
 export async function activate(context: ExtensionContext) {
   console.info("jsonui-support client start!");
   // backend path
@@ -52,6 +33,7 @@ export async function activate(context: ExtensionContext) {
   let clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file", language: "json" }],
     initializationOptions: {
+      locale: vsenv.language,
       settings: clientConfig,
     },
   };

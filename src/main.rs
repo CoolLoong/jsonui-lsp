@@ -4,7 +4,7 @@ use completion::Completer;
 use flexi_logger::{LogSpecification, Logger, LoggerHandle};
 use jsonc_parser::{parse_to_serde_value, ParseOptions};
 use log::{debug, set_max_level, trace};
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
@@ -29,9 +29,10 @@ struct Backend {
     completers: Mutex<HashMap<u64, Completer>>,
     /// cache namespace -> control_name -> control_type
     cache_type_map: Mutex<HashMap<String, HashMap<String, String>>>,
-    jsonui_define_map: HashMap<String, Vec<Value>>,
+    jsonui_define_map: HashMap<String, Value>,
     /// cache url -> namespace
     id_2_namespace_map: Mutex<HashMap<u64, Arc<str>>>,
+    lang: Mutex<Arc<str>>,
 }
 
 fn extract_prefix(input: &str) -> &str {
@@ -84,10 +85,6 @@ impl LanguageServer for Backend {
     }
 
     async fn initialize(&self, param: InitializeParams) -> Result<InitializeResult> {
-        let workspace_folders: std::path::PathBuf = param.root_uri.unwrap().to_file_path().unwrap();
-
-        self.init_workspace(workspace_folders).await;
-
         let init_config = &param.initialization_options.unwrap();
         if let Some(v) = init_config
             .get("settings")
@@ -112,6 +109,13 @@ impl LanguageServer for Backend {
                 _ => {}
             }
         }
+        let client_lang = init_config.get("locale").unwrap();
+        trace!("client lang is {}", json!(client_lang));
+        *self.lang.lock().await = Arc::from(client_lang.as_str().unwrap());
+
+        let workspace_folders: std::path::PathBuf =
+            param.root_uri.unwrap().to_file_path().unwrap();
+        self.init_workspace(workspace_folders).await;
 
         let file_operation_filters = vec![FileOperationFilter {
             scheme: Some("file".to_string()),
@@ -121,11 +125,9 @@ impl LanguageServer for Backend {
                 options: None,
             },
         }];
-
         let registration_options = FileOperationRegistrationOptions {
             filters: file_operation_filters,
         };
-
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
                 name: "jsonui support".to_string(),
@@ -138,7 +140,7 @@ impl LanguageServer for Backend {
                 )),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
-                    trigger_characters: Some(vec!["\"".to_string()]),
+                    trigger_characters: Some(vec!["\"".to_string(), ":".to_string()]),
                     work_done_progress_options: Default::default(),
                     all_commit_characters: None,
                     completion_item: Some(CompletionOptionsCompletionItem {
@@ -195,12 +197,12 @@ impl LanguageServer for Backend {
         let arc_content: Arc<str> = Arc::from(content);
 
         let url = &params.text_document.uri;
-        self.insert_namespace_by_content(url, &arc_content).await;
-
-        let mut cmp_map = self.completers.lock().await;
-        let hash_value = hash_uri(url);
-        let new_cmp = Completer::from(arc_content);
-        cmp_map.entry(hash_value).or_insert(new_cmp);
+        if let Ok(()) = self.insert_namespace_by_content(url, &arc_content).await {
+            let mut cmp_map = self.completers.lock().await;
+            let hash_value = hash_uri(url);
+            let new_cmp = Completer::from(arc_content);
+            cmp_map.entry(hash_value).or_insert(new_cmp);
+        }
     }
 
     // trigger in file change
@@ -281,20 +283,20 @@ impl LanguageServer for Backend {
 
         let cmp_v = cmp.get(&hash_value);
         if let Some(vv) = cmp_v {
-            if let Some(result) = vv.compelte(self, &params).await{
+            if let Some(result) = vv.compelte(self, &params).await {
                 return Ok(Some(CompletionResponse::Array(result)));
-            } 
+            }
         }
         Ok(None)
     }
 }
 
 impl Backend {
-    fn file_not_find_error(&self, path: &str) -> Error {
-        let e: ErrorCode = ErrorCode::ServerError(-35000);
+    fn namespace_not_find_error(&self, path: &str) -> Error {
+        let e: ErrorCode = ErrorCode::ServerError(-35001);
         Error {
             code: e,
-            message: Cow::Owned(format!("cant find file from {}", path)),
+            message: Cow::Owned(format!("cant find namespace from {}", path)),
             data: None,
         }
     }
@@ -327,14 +329,16 @@ impl Backend {
         }
     }
 
-    async fn insert_namespace_by_content(&self, url: &Url, content: &Arc<str>) {
+    async fn insert_namespace_by_content(&self, url: &Url, content: &Arc<str>) -> Result<()> {
         let hash_value = hash_uri(url);
 
         let namespace_op = get_namespace(content);
         if let Some(v) = namespace_op {
             let mut idmap = self.id_2_namespace_map.lock().await;
             idmap.entry(hash_value).or_insert(Arc::from(v));
+            return Ok(());
         }
+        Err(Self::namespace_not_find_error(&self, url.path()))
     }
 
     async fn insert_namespace(&self, url: &Url, namespace: Arc<str>) {
@@ -494,14 +498,13 @@ async fn main() {
         .collect();
 
     let jsonui_define: Value = serde_json::from_str(JSONUI_DEFINE).unwrap();
-    let obj = jsonui_define.as_object().ok_or("Expected a JSON object").unwrap();
-    let mut jsonui_define_map: HashMap<String, Vec<Value>> = HashMap::new();
+    let obj = jsonui_define
+        .as_object()
+        .ok_or("Expected a JSON object")
+        .unwrap();
+    let mut jsonui_define_map: HashMap<String, Value> = HashMap::new();
     for (key, value) in obj {
-        let vec = match value {
-            Value::Array(arr) => arr.clone(),
-            _ => vec![value.clone()],
-        };
-        jsonui_define_map.insert(key.to_string(), vec);
+        jsonui_define_map.insert(key.to_string(), value.clone());
     }
 
     let (service, socket) = LspService::build(|client| Backend {
@@ -511,6 +514,7 @@ async fn main() {
         cache_type_map: Mutex::new(cache_type_map),
         jsonui_define_map,
         id_2_namespace_map: Mutex::new(HashMap::new()),
+        lang: Mutex::new(Arc::from("zh-cn")),
     })
     .finish();
     Server::new(stdin, stdout, socket).serve(service).await;

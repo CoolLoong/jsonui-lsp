@@ -1,32 +1,236 @@
 {
-  "control_types": [
-    {
+  "common": [
+    "type",
+    "controls",
+    "visible",
+    "enabled",
+    "ignored",
+    "alpha",
+    "propagate_alpha",
+    "clips_children",
+    "allow_clipping",
+    "clip_offset",
+    "clip_state_change_event",
+    "enable_scissor_test",
+    "selected",
+    "variables",
+    "modifications",
+    "property_bag"
+  ],
+  "alpha": {
+    "description": {
+      "zh-cn": "控件的不透明度",
+      "en-us": "alpha value"
+    },
+    "values": [
+      {
+        "label": "alpha value",
+        "kind": 12,
+        "insert_text_format": 1,
+        "insert_text": "1.0"
+      }
+    ]
+  },
+  "enabled": {
+    "description": {
+      "zh-cn": "定义控件是否开启",
+      "en-us": "whether the control enabled"
+    },
+    "values": [
+      {
+        "label": "true",
+        "kind": 12,
+        "insert_text_format": 1
+      },
+      {
+        "label": "false",
+        "kind": 12,
+        "insert_text_format": 1
+      }
+    ]
+  },
+  "ignored": {
+    "description": {
+      "zh-cn": "定义控件是否忽略",
+      "en-us": "whether the control ignored"
+    },
+    "values": [
+      {
+        "label": "true",
+        "kind": 12,
+        "insert_text_format": 1
+      },
+      {
+        "label": "false",
+        "kind": 12,
+        "insert_text_format": 1
+      }
+    ]
+  },
+  "type": {
+    "description": {
+      "zh-cn": "定义该控件的类型",
+      "en-us": "define the control type"
+    },
+    "values": [
+      {
         "label": "label",
         "description": {
-            "zh": "文本控件",
-            "en": ""
-        },
-        "insert_text": "label"
-    }
-  ],
-  "label": [
-    {
-        "label": "text",
+          "zh-cn": "文本控件",
+          "en-us": "text control"
+        }
+      },
+      {
+        "label": "panel",
         "description": {
-            "zh": "定义文本控件显示的文字",
-            "en": ""
-        },
-        "insert_text": "text"
-    }
-  ],
-  "label.text": [
-    {
+          "zh-cn": "面板控件",
+          "en-us": "panel"
+        }
+      },
+      {
+        "label": "stack_panel",
+        "description": {
+          "zh-cn": "堆栈面板控件",
+          "en-us": "stack panel"
+        }
+      },
+      {
+        "label": "input_panel",
+        "description": {
+          "zh-cn": "输入面板",
+          "en-us": "input panel"
+        }
+      },
+      {
+        "label": "image",
+        "description": {
+          "zh-cn": "图像",
+          "en-us": "image"
+        }
+      },
+      {
+        "label": "button",
+        "description": {
+          "zh-cn": "按钮",
+          "en-us": "button"
+        }
+      },
+      {
+        "label": "toggle",
+        "description": {
+          "zh-cn": "切换按钮",
+          "en-us": "toggle"
+        }
+      },
+      {
+        "label": "dropdown",
+        "description": {
+          "zh-cn": "下拉框",
+          "en-us": "dropdown"
+        }
+      },
+      {
+        "label": "slider",
+        "description": {
+          "zh-cn": "滑块",
+          "en-us": "slider"
+        }
+      },
+      {
+        "label": "edit_box",
+        "description": {
+          "zh-cn": "编辑框",
+          "en-us": "edit box"
+        }
+      },
+      {
+        "label": "custom",
+        "description": {
+          "zh-cn": "custom",
+          "en-us": "custom"
+        }
+      },
+      {
+        "label": "factory",
+        "description": {
+          "zh-cn": "工厂",
+          "en-us": "factory"
+        }
+      },
+      {
+        "label": "scroll_view",
+        "description": {
+          "zh-cn": "scroll view",
+          "en-us": "scroll view"
+        }
+      },
+      {
+        "label": "scroll_track",
+        "description": {
+          "zh-cn": "滑块槽",
+          "en-us": "scroll track"
+        }
+      },
+      {
+        "label": "scrollbar_box",
+        "description": {
+          "zh-cn": "滑块",
+          "en-us": "scrollbar box"
+        }
+      },
+      {
+        "label": "selection_wheel",
+        "description": {
+          "zh-cn": "选择轮盘",
+          "en-us": "selection wheel"
+        }
+      },
+      {
+        "label": "screen",
+        "description": {
+          "zh-cn": "屏幕",
+          "en-us": "screen"
+        }
+      },
+      {
+        "label": "grid",
+        "description": {
+          "zh-cn": "网格布局",
+          "en-us": "grid"
+        }
+      }
+    ]
+  },
+  "controls": {
+    "description": {
+      "zh-cn": "添加子控件",
+      "en-us": "Add subcontrol"
+    },
+    "values": [
+      {
         "label": "value",
-        "description": {
-            "zh": "文本值",
-            "en": ""
-        },
-        "insert_text": "\"\""
-    }
-  ]
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "[\n\t{\n\t\t\"$0\"\n\t}\n]"
+      }
+    ]
+  },
+  "visible": {
+    "description": {
+      "zh-cn": "定义控件是否可见",
+      "en-us": "whether the control visible"
+    },
+    "values": [
+      {
+        "label": "true",
+        "kind": 12,
+        "insert_text_format": 1
+      },
+      {
+        "label": "false",
+        "kind": 12,
+        "insert_text_format": 1
+      }
+    ]
+  }
 }

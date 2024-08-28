@@ -2,12 +2,19 @@ use crate::document::Document;
 use crate::Backend;
 use log::{debug, trace};
 use std::{
-    borrow::Borrow, cell::{Cell, RefCell}, collections::{HashMap, VecDeque}, fmt, rc::Rc, sync::Arc, vec
+    borrow::Borrow,
+    cell::{Cell, RefCell},
+    collections::{HashMap, VecDeque},
+    fmt::{self, format},
+    rc::Rc,
+    sync::Arc,
+    vec,
 };
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemLabelDetails, CompletionParams, DidChangeTextDocumentParams,
-    Documentation, MarkupContent,
+    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionParams,
+    DidChangeTextDocumentParams, Documentation, InsertTextFormat, MarkupContent, Position, Range,
+    TextEdit,
 };
 
 #[derive(Debug, PartialEq, Clone)]
@@ -176,7 +183,6 @@ impl<'a> CompleteContext<'a> {
     }
 }
 
-
 /// `PathInfo` is used to record the path information of nodes within the built AST.
 struct PathInfo {
     stack: RefCell<VecDeque<usize>>,
@@ -212,7 +218,7 @@ impl PathInfo {
 
     /// back an index from path stack  
     /// then reset the current index  
-    fn back_path(&self, back_index: usize){
+    fn back_path(&self, back_index: usize) {
         let mut current = self.current.borrow_mut();
         let mut stack = self.stack.borrow_mut();
         *current = back_index;
@@ -223,9 +229,7 @@ impl PathInfo {
     /// push the currently index to path stack  
     /// then clear the current index  
     fn push_path(&self) -> Vec<usize> {
-        let index_value = {
-            *self.current.borrow_mut()
-        };
+        let index_value = { *self.current.borrow_mut() };
         let path = self.get_path();
         let mut current = self.current.borrow_mut();
         let mut stack = self.stack.borrow_mut();
@@ -235,11 +239,49 @@ impl PathInfo {
     }
 }
 
-
 #[derive(Debug)]
 pub(crate) struct Completer {
     document: Document,
     ast: Mutex<Option<Vec<Value>>>,
+}
+
+fn from_number_to_completion_item_kind(kind: u64) -> Option<CompletionItemKind> {
+    match kind {
+        1 => Some(CompletionItemKind::TEXT),
+        2 => Some(CompletionItemKind::METHOD),
+        3 => Some(CompletionItemKind::FUNCTION),
+        4 => Some(CompletionItemKind::CONSTRUCTOR),
+        5 => Some(CompletionItemKind::FIELD),
+        6 => Some(CompletionItemKind::VARIABLE),
+        7 => Some(CompletionItemKind::CLASS),
+        8 => Some(CompletionItemKind::INTERFACE),
+        9 => Some(CompletionItemKind::MODULE),
+        10 => Some(CompletionItemKind::PROPERTY),
+        11 => Some(CompletionItemKind::UNIT),
+        12 => Some(CompletionItemKind::VALUE),
+        13 => Some(CompletionItemKind::ENUM),
+        14 => Some(CompletionItemKind::KEYWORD),
+        15 => Some(CompletionItemKind::SNIPPET),
+        16 => Some(CompletionItemKind::COLOR),
+        17 => Some(CompletionItemKind::FILE),
+        18 => Some(CompletionItemKind::REFERENCE),
+        19 => Some(CompletionItemKind::FOLDER),
+        20 => Some(CompletionItemKind::ENUM_MEMBER),
+        21 => Some(CompletionItemKind::CONSTANT),
+        22 => Some(CompletionItemKind::STRUCT),
+        23 => Some(CompletionItemKind::EVENT),
+        24 => Some(CompletionItemKind::OPERATOR),
+        25 => Some(CompletionItemKind::TYPE_PARAMETER),
+        _ => None,
+    }
+}
+
+fn from_number_to_insert_text_format(kind: u64) -> Option<InsertTextFormat> {
+    match kind {
+        1 => Some(InsertTextFormat::PLAIN_TEXT),
+        2 => Some(InsertTextFormat::SNIPPET),
+        _ => None,
+    }
 }
 
 impl Completer {
@@ -250,19 +292,24 @@ impl Completer {
         }
     }
 
-    async fn fill_context<'a>(input: &'a [Value], context: &'a CompleteContext<'a>) {
+    async fn fill_context<'a>(
+        bk: &Backend,
+        param: &CompletionParams,
+        input: &'a [Value],
+        context: &'a CompleteContext<'a>,
+    ) {
         //find the neighbors node corresponding to the current index
         let mut result = Vec::new();
         Self::flatten_ast(input, &mut result);
         let v_index = *context.index.lock().await;
-        let node_index = result.iter().rposition(|value| value.r < v_index);
+        let node_index = result.iter().rposition(|value| value.r <= v_index);
 
         let mut neighbors: Vec<Option<&'a Value>> = Vec::with_capacity(5);
-        if let Some(i ) = node_index {
+        if let Some(i) = node_index {
             let i = i as i32;
             for offset in -1..4 {
                 let index = i + offset;
-                if index < 0 || index >= result.len() as i32{
+                if index < 0 || index >= result.len() as i32 {
                     neighbors.push(None);
                 } else {
                     neighbors.push(Some(result[index as usize]));
@@ -275,7 +322,7 @@ impl Completer {
         result.clear();
         Self::flatten_ast_one_layer(input, &mut result);
         for (index, i) in result.iter().enumerate() {
-            trace!("try find type from index {} context {:?}", index, i);
+            //trace!("try find type from index {} context {:?}", index, i);
             if i.type_id == TYPE_STR
                 && let Some(Node::String(v)) = &i.v
                 && v.as_ref() == "type"
@@ -287,6 +334,21 @@ impl Completer {
                     trace!("find type {} from context {:?}", type_v, i);
                     *context.control_type.lock().await = Some(type_v.clone());
                 }
+            }
+        }
+
+        let mut control_type_mut = context.control_type.lock().await;
+        if control_type_mut.is_none()
+            && let Some(Node::String(control_name)) = &input[0].v
+        {
+            let url = &param.text_document_position.text_document.uri;
+            let namespace: Option<Arc<str>> = bk.query_namespace(url).await;
+            let control_t = Self::fill_control_type(bk, namespace, control_name).await;
+            if let Some(v) = control_t {
+                trace!("find type from type_cache {:?}", input[0].v);
+                *control_type_mut = Some(Arc::from(v.as_str()));
+            } else {
+                trace!("cant find type from type_cache {:?}", input[0].v);
             }
         }
     }
@@ -309,7 +371,8 @@ impl Completer {
                     let opt = forward_iter
                         .skip_while(|(_, c)| c.as_ref() != "\"")
                         .skip(1)
-                        .skip_while(|(_, c)| c.as_ref() != "\"").nth(1);
+                        .skip_while(|(_, c)| c.as_ref() != "\"")
+                        .nth(1);
                     if let Some((index, _)) = opt {
                         start_index = Some(f_len - index);
                         break;
@@ -367,7 +430,7 @@ impl Completer {
         //write the input char currently
         {
             let input_char_index = index_value - 1;
-            if let Some(cr) = self.document.get_char(input_char_index).await{
+            if let Some(cr) = self.document.get_char(input_char_index).await {
                 *context.input_char.lock().await = cr;
             }
         }
@@ -385,35 +448,19 @@ impl Completer {
             self.build_ast(index_value, &context).await;
         }
 
-        
         //fill context from ast
         let ast = self.ast.lock().await;
         if ast.is_none() {
             return None;
         }
         let ast: &Vec<Value> = ast.as_ref().unwrap();
-        Self::fill_context(ast, &context).await;
-        let mut control_type_mut = context.control_type.lock().await;
-        if control_type_mut.is_none()
-            && let Some(Node::String(control_name)) = &ast[0].v
-        {
-            let url = &param.text_document_position.text_document.uri;
-            let namespace: Option<Arc<str>> = bk.query_namespace(url).await;
-            let control_t = self.fill_control_type(bk, namespace, control_name).await;
-            if let Some(v) = control_t {
-                trace!("find type from type_cache {:?}", ast[0].v);
-                *control_type_mut = Some(Arc::from(v.as_str()));
-            } else {
-                trace!("cant find type from type_cache {:?}", ast[0].v);
-                return None;
-            }
-        }
-
-        Self::create_completion_information(ast, param, &context, &bk.jsonui_define_map).await
+        Self::fill_context(bk, param, ast, &context).await;
+        let lang = bk.lang.lock().await;
+        Self::completion_information(lang.as_ref(), ast, param, &context, &bk.jsonui_define_map)
+            .await
     }
 
     async fn fill_control_type(
-        &self,
         bk: &Backend,
         namespace: Option<Arc<str>>,
         control_name: &Arc<str>,
@@ -441,59 +488,161 @@ impl Completer {
         None
     }
 
-    /// create completion result from context 
-    async fn create_completion_information<'a>(
+    /// create completion result from context
+    async fn completion_information<'a>(
+        lang: &str,
         ast: &Vec<Value>,
         param: &CompletionParams,
         context: &CompleteContext<'a>,
-        define_map: &HashMap<String, Vec<serde_json::Value>>,
+        define_map: &HashMap<String, serde_json::Value>,
     ) -> Option<Vec<CompletionItem>> {
-        debug!("context {:?}", context);
-        debug!("ast {:?}", ast);
-        /* let c = context.input_char.lock().await;
-        if *c == '"'{
-            let nodes = context.nodes.lock().await;
-            let n1 = nodes[0];
-            let n2 = nodes[1];
-            //CASE 1
-            if let Some(v) = n1 && let Some(v2) = n2 && v.type_id == TYPE_STR && v2.type_id == TYPE_COL{
+        trace!("context {:?}", context);
+        let type_c = context.control_type.lock().await;
+        let nodes = context.nodes.lock().await;
+        let input_c = context.input_char.lock().await;
 
-            }else if 
+        let c_type = type_c.as_ref();
+
+        let n1 = nodes[0];
+        let n2 = nodes[1];
+        let current = nodes[2];
+        let n3 = nodes[3];
+        let n4 = nodes[4];
+
+        if let Some(nv1) = n1
+            && let Some(Node::String(pn)) = &nv1.v
+            && let Some(nv2) = n2
+            && nv2.type_id == TYPE_COL
+            && (current.is_none() || current.unwrap().type_id != TYPE_CR)
+        {
+            trace!("create_value_completion");
+            return Self::create_value_completion(input_c.as_ref(), pn.as_ref(), lang, define_map);
+        } else if input_c.as_ref() == "\""
+            && let Some(current_v) = current
+            && (current_v.path.len() == 2 || current_v.type_id == TYPE_CR)
+        {
+            trace!("create_type_completion");
+            return Self::create_type_completion(param, c_type, lang, define_map);
         }
-        None */
+        None
+    }
 
-        Some(vec![CompletionItem {
-            label: "test".to_string(),
-            label_details: Some(CompletionItemLabelDetails {
-                description: Some("test des".to_string()),
-                detail: Some("test detail".to_string()),
-            }),
-            kind: None,
-            detail: Some("test detail 2".to_string()),
-            documentation: Some(Documentation::MarkupContent(MarkupContent {
-                kind: tower_lsp::lsp_types::MarkupKind::Markdown,
-                value: r#"我展示的是一级标题
-=================
+    fn create_value_completion(
+        input_c: &str,
+        property: &str,
+        lang: &str,
+        define_map: &HashMap<String, serde_json::Value>,
+    ) -> Option<Vec<CompletionItem>> {
+        let mut result = Vec::new();
+        if let Some(v) = define_map.get(property)
+            && let Some(serde_json::Value::Array(values)) = v.get("values")
+        {
+            for i in values {
+                let value = i.as_object().unwrap();
+                let des = value.get("description");
+                let insert_text_format = value.get("insert_text_format").map_or(None, |k| {
+                    from_number_to_insert_text_format(k.as_u64().unwrap())
+                });
+                result.push(CompletionItem {
+                    label: value.get("label").unwrap().to_string(),
+                    label_details: Some(CompletionItemLabelDetails {
+                        description: des.map_or(Some("jsonui support".to_string()), |d| {
+                            d.get(lang).or(d.get("en-us")).map_or(None, |f| {
+                                f.as_str().map_or(None, |ff| Some(ff.to_string()))
+                            })
+                        }),
+                        detail: None,
+                    }),
+                    kind: value.get("kind").map_or(None, |k| {
+                        from_number_to_completion_item_kind(k.as_u64().unwrap())
+                    }),
+                    insert_text_format,
+                    insert_text: value.get("insert_text").or(value.get("label")).map_or(
+                        None,
+                        |k| {
+                            if input_c == ":"
+                                && insert_text_format.is_some()
+                            {
+                                Some(format!(" {}", k.as_str().unwrap()))
+                            } else if input_c == ":" {
+                                Some(format!(" \"{}\"", k.as_str().unwrap()))
+                            } else {
+                                Some(k.as_str().unwrap().to_string())
+                            }
+                        },
+                    ),
+                    preselect: Some(true),
+                    sort_text: Some("0001".to_string()),
+                    ..Default::default()
+                })
+            }
+        }
 
-我展示的是二级标题
------------------"#
-                    .to_string(),
-            })),
-            deprecated: None,
-            preselect: None,
-            sort_text: None,
-            filter_text: None,
-            insert_text: Some("test".to_string()),
-            insert_text_format: None,
-            insert_text_mode: None,
-            text_edit: None,
-            additional_text_edits: None,
-            command: None,
-            commit_characters: None,
-            data: None,
-            tags: None,
-        }])
-        // None
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
+    }
+
+    fn create_type_completion(
+        param: &CompletionParams,
+        c_type: Option<&Arc<str>>,
+        lang: &str,
+        define_map: &HashMap<String, serde_json::Value>,
+    ) -> Option<Vec<CompletionItem>> {
+        let mut inputs: Vec<serde_json::Value> = vec![];
+        if let Some(c_type) = c_type
+            && let Some(serde_json::Value::Array(arr)) = define_map.get(c_type.as_ref())
+        {
+            inputs.append(&mut arr.clone());
+        }
+        inputs.append(
+            &mut define_map
+                .get("common")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .clone(),
+        );
+        let mut result = Vec::new();
+        for av in inputs {
+            if let serde_json::Value::String(str) = av {
+                if let Some(v) = define_map.get(&str) {
+                    let des = v.get("description").unwrap();
+                    result.push(CompletionItem {
+                        label: str.to_owned(),
+                        label_details: Some(CompletionItemLabelDetails {
+                            description: des.get(lang).or(des.get("en-us")).map_or(None, |f| {
+                                f.as_str().map_or(None, |ff| Some(ff.to_string()))
+                            }),
+                            ..Default::default()
+                        }),
+                        kind: Some(CompletionItemKind::TEXT),
+                        text_edit: Some(tower_lsp::lsp_types::CompletionTextEdit::Edit(TextEdit {
+                            range: Range {
+                                start: Position {
+                                    line: param.text_document_position.position.line,
+                                    character: param.text_document_position.position.character,
+                                },
+                                end: Position {
+                                    line: param.text_document_position.position.line,
+                                    character: param.text_document_position.position.character + 1,
+                                },
+                            },
+                            new_text: format!("{}\"", str.to_owned()),
+                        })),
+                        insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+                        ..Default::default()
+                    })
+                }
+            }
+        }
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
     }
 
     pub async fn update_ast(&self) {
@@ -507,10 +656,10 @@ impl Completer {
         self.document.apply_change(request).await;
     }
 
-    fn not_quote_state(stack : &VecDeque<Value>) -> bool{
+    fn not_quote_state(stack: &VecDeque<Value>) -> bool {
         stack
-        .back()
-        .map_or(true, |node| node.type_id != TYPE_STR || node.v.is_some())
+            .back()
+            .map_or(true, |node| node.type_id != TYPE_STR || node.v.is_some())
     }
 
     async fn build_ast<'a>(&self, index: usize, context: &'a CompleteContext<'a>) {
@@ -530,22 +679,19 @@ impl Completer {
                 let str = c.as_ref();
                 match str.into() {
                     Token::Quote => Self::handle_quote(&mut stack, &mut str_builder, i, path_info),
-                    Token::LeftBrace if Self::not_quote_state(&stack) => {
-                        stack.push_back(Value {
-                            l: i,
-                            r: 0,
-                            type_id: TYPE_CR,
-                            path: path_info.push_path(),
-                            v: None,
-                        })
-                    }
-                    Token::LeftBracket if Self::not_quote_state(&stack) => 
-                        stack.push_back(Value {
-                            l: i,
-                            r: 0,
-                            type_id: TYPE_ARR,
-                            path: path_info.push_path(),
-                            v: None,
+                    Token::LeftBrace if Self::not_quote_state(&stack) => stack.push_back(Value {
+                        l: i,
+                        r: 0,
+                        type_id: TYPE_CR,
+                        path: path_info.push_path(),
+                        v: None,
+                    }),
+                    Token::LeftBracket if Self::not_quote_state(&stack) => stack.push_back(Value {
+                        l: i,
+                        r: 0,
+                        type_id: TYPE_ARR,
+                        path: path_info.push_path(),
+                        v: None,
                     }),
                     Token::Colon if Self::not_quote_state(&stack) => {
                         stack.push_back(Value {
@@ -555,10 +701,16 @@ impl Completer {
                             path: path_info.get_path(),
                             v: Some(Node::Colon),
                         });
-                    },
-                    Token::RightBrace if Self::not_quote_state(&stack) => Self::handle_right_brace(&mut stack, i, path_info),
-                    Token::RightBracket if Self::not_quote_state(&stack) => Self::handle_right_bracket(&mut stack, i, path_info),
-                    Token::Comma if Self::not_quote_state(&stack) => Self::handle_comma(&mut stack, &mut str_builder, i,path_info),
+                    }
+                    Token::RightBrace if Self::not_quote_state(&stack) => {
+                        Self::handle_right_brace(&mut stack, i, path_info)
+                    }
+                    Token::RightBracket if Self::not_quote_state(&stack) => {
+                        Self::handle_right_bracket(&mut stack, i, path_info)
+                    }
+                    Token::Comma if Self::not_quote_state(&stack) => {
+                        Self::handle_comma(&mut stack, &mut str_builder, i, path_info)
+                    }
                     _ if Token::is_ignore(str) => continue,
                     _ => str_builder.push_str(str),
                 }
@@ -603,7 +755,12 @@ impl Completer {
         }
     }
 
-    fn handle_quote(stack: &mut VecDeque<Value>, str_builder: &mut String, index: usize, path_info: &PathInfo) {
+    fn handle_quote(
+        stack: &mut VecDeque<Value>,
+        str_builder: &mut String,
+        index: usize,
+        path_info: &PathInfo,
+    ) {
         if !stack.iter().any(|f| TYPE_STR == f.type_id && f.v.is_none()) {
             str_builder.clear(); //remove potential comments
             stack.push_back(Value {
@@ -668,7 +825,12 @@ impl Completer {
         }
     }
 
-    fn handle_comma(stack: &mut VecDeque<Value>, str_builder: &mut String, index: usize, path_info: &PathInfo) {
+    fn handle_comma(
+        stack: &mut VecDeque<Value>,
+        str_builder: &mut String,
+        index: usize,
+        path_info: &PathInfo,
+    ) {
         if !str_builder.is_empty() {
             let str_c = str_builder.len();
             if let Ok(boolean) = str_builder.parse::<bool>() {
