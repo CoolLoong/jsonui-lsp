@@ -10,7 +10,6 @@ vanillapack_define_gen
 .gitignore
 Cargo.lock
 Cargo.toml
-package.json
 pnpm-lock.yaml
 tsconfig.json
 webpack.config.js

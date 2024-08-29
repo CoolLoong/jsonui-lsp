@@ -14,8 +14,7 @@
         "script": "watch"
       },
       "env": {
-        "SERVER_PATH": "${workspaceRoot}/target/debug/jsonui-lsp",
-        "RUST_BACKTRACE": "1"
+        "SERVER_PATH": "${workspaceRoot}/target/debug/jsonui-lsp"
       }
     },
     {

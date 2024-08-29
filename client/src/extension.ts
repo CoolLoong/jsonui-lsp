@@ -9,17 +9,19 @@ import {
   LanguageClientOptions,
   ServerOptions,
 } from "vscode-languageclient/node";
+import * as path from 'path';
 
 let client: LanguageClient;
 export async function activate(context: ExtensionContext) {
   console.info("jsonui-support client start!");
   // backend path
-  const command = process.env.SERVER_PATH || "jsonui-lsp";
+  const command = process.env.SERVER_PATH || path.join(context.extensionPath, 'dist', 'jsonui-lsp');
   const run: Executable = {
     command,
     options: {
       env: {
-        ...process.env
+        ...process.env,
+        RUST_BACKTRACE: 1
       },
     },
   };
