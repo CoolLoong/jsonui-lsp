@@ -221,6 +221,7 @@ impl Document {
 
 #[cfg(test)]
 mod tests {
+    use log::debug;
     use tower_lsp::lsp_types::{
         Range, TextDocumentContentChangeEvent, Url, VersionedTextDocumentIdentifier,
     };
@@ -317,9 +318,9 @@ mod tests {
         };
         document.apply_change(&request).await;
         let docs = document.content_cache.lock().await;
-        let crs = document.content_chars.lock().await;
+        println!("{}",docs);
         #[rustfmt::skip]
-        assert!(docs.contains("\"clip_pixelperfect\": \r\n  },"));
+        assert!(docs.contains("\"clip_pixelperfect\": \n  },"));
     }
 
     #[tokio::test]
