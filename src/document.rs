@@ -4,7 +4,6 @@ use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{DidChangeTextDocumentParams, Position};
 use unicode_segmentation::UnicodeSegmentation;
 
-
 #[derive(Debug)]
 pub struct Document {
     pub line_info_cache: Mutex<Vec<LineInfo>>,
@@ -101,7 +100,7 @@ impl Document {
     }
 
     /// position line index start from 0
-    pub async fn get_content_index(&self, pos: &Position) -> Option<usize> {
+    pub async fn get_index_from_position(&self, pos: &Position) -> Option<usize> {
         let line = pos.line as usize; // Index starts from 0
         let line_cache = self.line_info_cache.lock().await;
 
@@ -123,13 +122,44 @@ impl Document {
         Some(result)
     }
 
+    /// Given a character index, return the corresponding Position in the document.
+    /// Index starts from 0.
+    pub async fn get_position_from_index(&self, index: usize) -> Option<Position> {
+        let line_cache = self.line_info_cache.lock().await;
+
+        // Calculate the total number of characters in the document
+        let total_chars = line_cache.iter().map(|info| info.char_count).sum::<usize>();
+
+        if index >= total_chars {
+            return None; // Index is out of bounds
+        }
+
+        let mut current_index = 0;
+
+        for (line_num, info) in line_cache.iter().enumerate() {
+            // Check if the index is within this line
+            if index < current_index + info.char_count {
+                let character = index - current_index;
+                return Some(Position {
+                    line: line_num as u32,
+                    character: character as u32,
+                });
+            }
+
+            // Update the current index to the start of the next line
+            current_index += info.char_count;
+        }
+
+        None // Should not reach here if total_chars is correctly calculated
+    }
+
     pub async fn apply_change(&self, request: &DidChangeTextDocumentParams) {
         for e in request.content_changes.iter() {
             if let Some(v) = e.range {
                 let s = &v.start;
                 let end = &v.end;
-                let start_index = self.get_content_index(s).await;
-                let end_index = self.get_content_index(end).await;
+                let start_index = self.get_index_from_position(s).await;
+                let end_index = self.get_index_from_position(end).await;
                 if let Some(si) = start_index
                     && let Some(ei) = end_index
                 {
@@ -150,7 +180,7 @@ impl Document {
         if forward.is_empty() || backward.is_empty() {
             return None;
         }
-        
+
         let f_len = forward.len();
         let mut left_boundary_char: &str = "{";
         let mut right_boundary_char: &str = "}";
@@ -167,16 +197,16 @@ impl Document {
                         .skip_while(|(_, c)| c.as_ref() != "\"")
                         .skip(1)
                         .skip_while(|(_, c)| {
-                            if c.as_ref() != "\""{
+                            if c.as_ref() != "\"" {
                                 collected_str.push_str(c);
                                 true
-                            }else{
+                            } else {
                                 false
                             }
                         })
                         .nth(1);
                     if let Some((index, _)) = opt {
-                        if collected_str == "sgnidnib" || collected_str == "slortnoc"{
+                        if collected_str == "sgnidnib" || collected_str == "slortnoc" {
                             forward_iter = forward.iter().rev().peekable().enumerate();
                             left_boundary_char = "[";
                             right_boundary_char = "]";
@@ -219,7 +249,7 @@ impl Document {
 
 #[cfg(test)]
 mod tests {
-    
+
     use tower_lsp::lsp_types::{
         Range, TextDocumentContentChangeEvent, Url, VersionedTextDocumentIdentifier,
     };
@@ -316,7 +346,7 @@ mod tests {
         };
         document.apply_change(&request).await;
         let docs = document.content_cache.lock().await;
-        println!("{}",docs);
+        println!("{}", docs);
         #[rustfmt::skip]
         assert!(docs.contains("\"clip_pixelperfect\": \n  },"));
     }
@@ -340,7 +370,7 @@ mod tests {
     async fn test_get_boundary_indices() {
         let document = Document::from(&EXAMPLE1.to_string());
         let v: usize = document
-            .get_content_index(&Position {
+            .get_index_from_position(&Position {
                 line: 16,
                 character: 6,
             })
@@ -354,7 +384,7 @@ mod tests {
         assert_eq!((lc.as_ref(), rc.as_ref()), ("\"", "}"));
 
         let v = document
-            .get_content_index(&Position {
+            .get_index_from_position(&Position {
                 line: 6,
                 character: 3,
             })

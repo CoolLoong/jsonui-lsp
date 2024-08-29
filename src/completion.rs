@@ -1,5 +1,5 @@
-use crate::{completion_helper::create_completion, document::Document};
 use crate::Backend;
+use crate::{completion_helper::create_completion, document::Document};
 use log::{debug, trace};
 use std::{
     cell::RefCell,
@@ -10,8 +10,8 @@ use std::{
 };
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionParams,
-    DidChangeTextDocumentParams,
+    Color, ColorInformation, CompletionItem, CompletionParams, DidChangeTextDocumentParams,
+    DocumentColorParams, Range,
 };
 
 #[derive(Debug, PartialEq, Clone)]
@@ -242,7 +242,6 @@ pub(crate) struct Completer {
     ast: Mutex<Option<Vec<Value>>>,
 }
 
-
 impl Completer {
     pub fn from(str: Arc<str>) -> Self {
         Completer {
@@ -337,7 +336,6 @@ impl Completer {
         None
     }
 
-    
     pub async fn compelte(
         &self,
         bk: &Backend,
@@ -347,7 +345,7 @@ impl Completer {
 
         // get current index in content
         let context: CompleteContext = CompleteContext::empty();
-        let index = self.document.get_content_index(pos).await;
+        let index = self.document.get_index_from_position(pos).await;
         let index_value;
         if let Some(index_v) = index {
             *context.index.lock().await = index_v;
@@ -386,6 +384,60 @@ impl Completer {
         Self::fill_context(bk, param, ast, &context).await;
         let lang = bk.lang.lock().await;
         create_completion(lang.as_ref(), &bk.jsonui_define_map, param, &context, ast).await
+    }
+
+    pub async fn compelte_color(
+        &self,
+        params: &DocumentColorParams,
+    ) -> Option<Vec<ColorInformation>> {
+        let ast = self.ast.lock().await;
+        trace!("ast {:?}", ast);
+        if ast.is_none() {
+            return None;
+        }
+        let mut inputs = Vec::new();
+        let ast: &Vec<Value> = ast.as_ref().unwrap();
+        Self::flatten_ast(ast, &mut inputs);
+        let color_v = inputs
+            .iter()
+            .skip_while(|r| {
+                if let Some(Node::String(v)) = &r.v
+                    && v.as_ref() == "color"
+                {
+                    false
+                } else {
+                    true
+                }
+            })
+            .nth(2);
+        let mut result = Vec::new();
+        if let Some(color_v) = color_v {
+            let left = color_v.l;
+            let left_pos = self.document.get_position_from_index(left).await;
+            let right = color_v.r;
+            let right_pos = self.document.get_position_from_index(right).await;
+            if let Some(left_v) = left_pos
+                && let Some(right_v) = right_pos
+            {
+                result.push(ColorInformation {
+                    range: Range {
+                        start: left_v,
+                        end: right_v,
+                    },
+                    color: Color {
+                        red: 1.0,
+                        green: 1.0,
+                        blue: 1.0,
+                        alpha: 1.0,
+                    },
+                })
+            }
+        }
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
     }
 
     pub async fn update_ast(&self) {
@@ -617,7 +669,7 @@ mod tests {
         let completer = Completer::from(EXAMPLE1.into());
         let index = completer
             .document
-            .get_content_index(&Position {
+            .get_index_from_position(&Position {
                 line: 16,
                 character: 5,
             })
@@ -628,7 +680,7 @@ mod tests {
 
         let result = completer
             .document
-            .get_content_index(&Position {
+            .get_index_from_position(&Position {
                 line: 44,
                 character: 1,
             })
@@ -641,7 +693,7 @@ mod tests {
         let completer = Completer::from(EXAMPLE1.into());
         let v = completer
             .document
-            .get_content_index(&Position {
+            .get_index_from_position(&Position {
                 line: 16,
                 character: 5,
             })
@@ -656,7 +708,7 @@ mod tests {
 
         let v = completer
             .document
-            .get_content_index(&Position {
+            .get_index_from_position(&Position {
                 line: 0,
                 character: 1,
             })
