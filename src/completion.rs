@@ -1,4 +1,4 @@
-use crate::document::Document;
+use crate::{completion_helper::create_completion, document::Document};
 use crate::Backend;
 use log::{debug, trace};
 use std::{
@@ -29,21 +29,21 @@ pub enum Token {
     OTHER = '🤪' as isize,
 }
 
-const TYPE_CR: u8 = 2;
-const TYPE_ARR: u8 = 3;
-const TYPE_STR: u8 = 4;
-const TYPE_NUM: u8 = 5;
-const TYPE_BOL: u8 = 6;
-const TYPE_COL: u8 = 7;
-const TYPE_COM: u8 = 8;
+pub const TYPE_CR: u8 = 2;
+pub const TYPE_ARR: u8 = 3;
+pub const TYPE_STR: u8 = 4;
+pub const TYPE_NUM: u8 = 5;
+pub const TYPE_BOL: u8 = 6;
+pub const TYPE_COL: u8 = 7;
+pub const TYPE_COM: u8 = 8;
 
 #[derive(Clone, PartialEq, Eq)]
-pub struct Value {
-    l: usize,
-    r: usize,
-    type_id: u8,
-    path: Vec<usize>,
-    v: Option<Node>,
+pub(crate) struct Value {
+    pub(crate) l: usize,
+    pub(crate) r: usize,
+    pub(crate) type_id: u8,
+    pub(crate) path: Vec<usize>,
+    pub(crate) v: Option<Node>,
 }
 
 impl Value {
@@ -160,13 +160,13 @@ impl Token {
 
 /// `CompleteContext` is a struct used to describe contextual information at the completion position within vscode.
 #[derive(Debug)]
-struct CompleteContext<'a> {
-    control_type: Mutex<Option<Arc<str>>>,
-    l: Mutex<usize>,
-    r: Mutex<usize>,
-    index: Mutex<usize>,
-    input_char: Mutex<Arc<str>>,
-    nodes: Mutex<Vec<Option<&'a Value>>>,
+pub(crate) struct CompleteContext<'a> {
+    pub(crate) control_type: Mutex<Option<Arc<str>>>,
+    pub(crate) l: Mutex<usize>,
+    pub(crate) r: Mutex<usize>,
+    pub(crate) index: Mutex<usize>,
+    pub(crate) input_char: Mutex<Arc<str>>,
+    pub(crate) nodes: Mutex<Vec<Option<&'a Value>>>,
 }
 
 impl<'a> CompleteContext<'a> {
@@ -245,44 +245,6 @@ pub(crate) struct Completer {
     ast: Mutex<Option<Vec<Value>>>,
 }
 
-fn from_number_to_completion_item_kind(kind: u64) -> Option<CompletionItemKind> {
-    match kind {
-        1 => Some(CompletionItemKind::TEXT),
-        2 => Some(CompletionItemKind::METHOD),
-        3 => Some(CompletionItemKind::FUNCTION),
-        4 => Some(CompletionItemKind::CONSTRUCTOR),
-        5 => Some(CompletionItemKind::FIELD),
-        6 => Some(CompletionItemKind::VARIABLE),
-        7 => Some(CompletionItemKind::CLASS),
-        8 => Some(CompletionItemKind::INTERFACE),
-        9 => Some(CompletionItemKind::MODULE),
-        10 => Some(CompletionItemKind::PROPERTY),
-        11 => Some(CompletionItemKind::UNIT),
-        12 => Some(CompletionItemKind::VALUE),
-        13 => Some(CompletionItemKind::ENUM),
-        14 => Some(CompletionItemKind::KEYWORD),
-        15 => Some(CompletionItemKind::SNIPPET),
-        16 => Some(CompletionItemKind::COLOR),
-        17 => Some(CompletionItemKind::FILE),
-        18 => Some(CompletionItemKind::REFERENCE),
-        19 => Some(CompletionItemKind::FOLDER),
-        20 => Some(CompletionItemKind::ENUM_MEMBER),
-        21 => Some(CompletionItemKind::CONSTANT),
-        22 => Some(CompletionItemKind::STRUCT),
-        23 => Some(CompletionItemKind::EVENT),
-        24 => Some(CompletionItemKind::OPERATOR),
-        25 => Some(CompletionItemKind::TYPE_PARAMETER),
-        _ => None,
-    }
-}
-
-fn from_number_to_insert_text_format(kind: u64) -> Option<InsertTextFormat> {
-    match kind {
-        1 => Some(InsertTextFormat::PLAIN_TEXT),
-        2 => Some(InsertTextFormat::SNIPPET),
-        _ => None,
-    }
-}
 
 impl Completer {
     pub fn from(str: Arc<str>) -> Self {
@@ -322,7 +284,6 @@ impl Completer {
         result.clear();
         Self::flatten_ast_one_layer(input, &mut result);
         for (index, i) in result.iter().enumerate() {
-            //trace!("try find type from index {} context {:?}", index, i);
             if i.type_id == TYPE_STR
                 && let Some(Node::String(v)) = &i.v
                 && v.as_ref() == "type"
@@ -331,7 +292,6 @@ impl Completer {
                 if type_node_index < result.len()
                     && let Some(Node::String(type_v)) = &result[type_node_index].v
                 {
-                    trace!("find type {} from context {:?}", type_v, i);
                     *context.control_type.lock().await = Some(type_v.clone());
                 }
             }
@@ -345,7 +305,6 @@ impl Completer {
             let namespace: Option<Arc<str>> = bk.query_namespace(url).await;
             let control_t = Self::fill_control_type(bk, namespace, control_name).await;
             if let Some(v) = control_t {
-                trace!("find type from type_cache {:?}", input[0].v);
                 *control_type_mut = Some(Arc::from(v.as_str()));
             } else {
                 trace!("cant find type from type_cache {:?}", input[0].v);
@@ -353,62 +312,35 @@ impl Completer {
         }
     }
 
-    async fn get_boundary_indices(&self, index: usize) -> Option<(usize, usize)> {
-        let content = self.document.content_chars.lock().await;
-        let (forward, backward) = content.split_at(index);
-        if forward.is_empty() || backward.is_empty() {
-            return None;
-        }
-
-        let f_len = forward.len();
-        let mut stack: VecDeque<&str> = VecDeque::new();
-        let mut start_index: Option<usize> = None;
-        let mut forward_iter = forward.iter().rev().peekable().enumerate();
-        while let Some((_, ch)) = forward_iter.next() {
-            let str = ch.as_ref();
-            if str == "{" {
-                if stack.is_empty() {
-                    let opt = forward_iter
-                        .skip_while(|(_, c)| c.as_ref() != "\"")
-                        .skip(1)
-                        .skip_while(|(_, c)| c.as_ref() != "\"")
-                        .nth(1);
-                    if let Some((index, _)) = opt {
-                        start_index = Some(f_len - index);
-                        break;
-                    } else {
-                        return None;
-                    }
-                } else {
-                    stack.pop_back();
-                }
-            } else if str == "}" {
-                stack.push_back(str);
+    async fn fill_control_type(
+        bk: &Backend,
+        namespace: Option<Arc<str>>,
+        control_name: &Arc<str>,
+    ) -> Option<String> {
+        let vec: Vec<&str> = control_name.as_ref().split("@").collect();
+        if vec.len() == 1
+            && let Some(np) = namespace
+        {
+            return bk.query_type(np, Arc::from(vec[0])).await;
+        } else if vec.len() == 2 {
+            let refer_namespace = vec[1];
+            let namespace_sp: Vec<&str> = refer_namespace.split(".").collect();
+            if namespace_sp.len() == 2 {
+                let refer_namespace_n = namespace_sp[0];
+                let refer_control_n = namespace_sp[1];
+                return bk
+                    .query_type(Arc::from(refer_namespace_n), Arc::from(refer_control_n))
+                    .await;
+            } else if namespace_sp.len() == 1
+                && let Some(np) = namespace
+            {
+                return bk.query_type(np, Arc::from(namespace_sp[0])).await;
             }
         }
-        start_index?;
-
-        stack.clear();
-        let mut end_index: Option<usize> = None;
-        let backend_iter = backward.iter().peekable().enumerate();
-        for (index, ch) in backend_iter {
-            let str = ch.as_ref();
-            if str == "}" {
-                if stack.is_empty() {
-                    end_index = Some(index + f_len);
-                    break;
-                } else {
-                    stack.pop_back();
-                }
-            } else if str == "{" {
-                stack.push_back(str);
-            }
-        }
-        end_index?;
-
-        Some((start_index.unwrap(), end_index.unwrap()))
+        None
     }
 
+    
     pub async fn compelte(
         &self,
         bk: &Backend,
@@ -456,193 +388,7 @@ impl Completer {
         let ast: &Vec<Value> = ast.as_ref().unwrap();
         Self::fill_context(bk, param, ast, &context).await;
         let lang = bk.lang.lock().await;
-        Self::completion_information(lang.as_ref(), ast, param, &context, &bk.jsonui_define_map)
-            .await
-    }
-
-    async fn fill_control_type(
-        bk: &Backend,
-        namespace: Option<Arc<str>>,
-        control_name: &Arc<str>,
-    ) -> Option<String> {
-        let vec: Vec<&str> = control_name.as_ref().split("@").collect();
-        if vec.len() == 1
-            && let Some(np) = namespace
-        {
-            return bk.query_type(np, Arc::from(vec[0])).await;
-        } else if vec.len() == 2 {
-            let refer_namespace = vec[1];
-            let namespace_sp: Vec<&str> = refer_namespace.split(".").collect();
-            if namespace_sp.len() == 2 {
-                let refer_namespace_n = namespace_sp[0];
-                let refer_control_n = namespace_sp[1];
-                return bk
-                    .query_type(Arc::from(refer_namespace_n), Arc::from(refer_control_n))
-                    .await;
-            } else if namespace_sp.len() == 1
-                && let Some(np) = namespace
-            {
-                return bk.query_type(np, Arc::from(namespace_sp[0])).await;
-            }
-        }
-        None
-    }
-
-    /// create completion result from context
-    async fn completion_information<'a>(
-        lang: &str,
-        ast: &Vec<Value>,
-        param: &CompletionParams,
-        context: &CompleteContext<'a>,
-        define_map: &HashMap<String, serde_json::Value>,
-    ) -> Option<Vec<CompletionItem>> {
-        trace!("context {:?}", context);
-        let type_c = context.control_type.lock().await;
-        let nodes = context.nodes.lock().await;
-        let input_c = context.input_char.lock().await;
-
-        let c_type = type_c.as_ref();
-
-        let n1 = nodes[0];
-        let n2 = nodes[1];
-        let current = nodes[2];
-        let n3 = nodes[3];
-        let n4 = nodes[4];
-
-        if let Some(nv1) = n1
-            && let Some(Node::String(pn)) = &nv1.v
-            && let Some(nv2) = n2
-            && nv2.type_id == TYPE_COL
-            && (current.is_none() || current.unwrap().type_id != TYPE_CR)
-        {
-            trace!("create_value_completion");
-            return Self::create_value_completion(input_c.as_ref(), pn.as_ref(), lang, define_map);
-        } else if input_c.as_ref() == "\""
-            && let Some(current_v) = current
-            && (current_v.path.len() == 2 || current_v.type_id == TYPE_CR)
-        {
-            trace!("create_type_completion");
-            return Self::create_type_completion(param, c_type, lang, define_map);
-        }
-        None
-    }
-
-    fn create_value_completion(
-        input_c: &str,
-        property: &str,
-        lang: &str,
-        define_map: &HashMap<String, serde_json::Value>,
-    ) -> Option<Vec<CompletionItem>> {
-        let mut result = Vec::new();
-        if let Some(v) = define_map.get(property)
-            && let Some(serde_json::Value::Array(values)) = v.get("values")
-        {
-            for i in values {
-                let value = i.as_object().unwrap();
-                let des = value.get("description");
-                let insert_text_format = value.get("insert_text_format").map_or(None, |k| {
-                    from_number_to_insert_text_format(k.as_u64().unwrap())
-                });
-                result.push(CompletionItem {
-                    label: value.get("label").unwrap().to_string(),
-                    label_details: Some(CompletionItemLabelDetails {
-                        description: des.map_or(Some("jsonui support".to_string()), |d| {
-                            d.get(lang).or(d.get("en-us")).map_or(None, |f| {
-                                f.as_str().map_or(None, |ff| Some(ff.to_string()))
-                            })
-                        }),
-                        detail: None,
-                    }),
-                    kind: value.get("kind").map_or(None, |k| {
-                        from_number_to_completion_item_kind(k.as_u64().unwrap())
-                    }),
-                    insert_text_format,
-                    insert_text: value.get("insert_text").or(value.get("label")).map_or(
-                        None,
-                        |k| {
-                            if input_c == ":"
-                                && insert_text_format.is_some()
-                            {
-                                Some(format!(" {}", k.as_str().unwrap()))
-                            } else if input_c == ":" {
-                                Some(format!(" \"{}\"", k.as_str().unwrap()))
-                            } else {
-                                Some(k.as_str().unwrap().to_string())
-                            }
-                        },
-                    ),
-                    preselect: Some(true),
-                    sort_text: Some("0001".to_string()),
-                    ..Default::default()
-                })
-            }
-        }
-
-        if result.is_empty() {
-            None
-        } else {
-            Some(result)
-        }
-    }
-
-    fn create_type_completion(
-        param: &CompletionParams,
-        c_type: Option<&Arc<str>>,
-        lang: &str,
-        define_map: &HashMap<String, serde_json::Value>,
-    ) -> Option<Vec<CompletionItem>> {
-        let mut inputs: Vec<serde_json::Value> = vec![];
-        if let Some(c_type) = c_type
-            && let Some(serde_json::Value::Array(arr)) = define_map.get(c_type.as_ref())
-        {
-            inputs.append(&mut arr.clone());
-        }
-        inputs.append(
-            &mut define_map
-                .get("common")
-                .unwrap()
-                .as_array()
-                .unwrap()
-                .clone(),
-        );
-        let mut result = Vec::new();
-        for av in inputs {
-            if let serde_json::Value::String(str) = av {
-                if let Some(v) = define_map.get(&str) {
-                    let des = v.get("description").unwrap();
-                    result.push(CompletionItem {
-                        label: str.to_owned(),
-                        label_details: Some(CompletionItemLabelDetails {
-                            description: des.get(lang).or(des.get("en-us")).map_or(None, |f| {
-                                f.as_str().map_or(None, |ff| Some(ff.to_string()))
-                            }),
-                            ..Default::default()
-                        }),
-                        kind: Some(CompletionItemKind::TEXT),
-                        text_edit: Some(tower_lsp::lsp_types::CompletionTextEdit::Edit(TextEdit {
-                            range: Range {
-                                start: Position {
-                                    line: param.text_document_position.position.line,
-                                    character: param.text_document_position.position.character,
-                                },
-                                end: Position {
-                                    line: param.text_document_position.position.line,
-                                    character: param.text_document_position.position.character + 1,
-                                },
-                            },
-                            new_text: format!("{}\"", str.to_owned()),
-                        })),
-                        insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
-                        ..Default::default()
-                    })
-                }
-            }
-        }
-        if result.is_empty() {
-            None
-        } else {
-            Some(result)
-        }
+        create_completion(lang.as_ref(), &bk.jsonui_define_map, param, &context, ast).await
     }
 
     pub async fn update_ast(&self) {
@@ -663,15 +409,13 @@ impl Completer {
     }
 
     async fn build_ast<'a>(&self, index: usize, context: &'a CompleteContext<'a>) {
-        let indices = self.get_boundary_indices(index).await;
+        let indices = self.document.get_boundary_indices(index).await;
         if let Some((l, r)) = indices {
             let chars = self.document.content_chars.lock().await;
             let splice_control = &chars[l..r + 1];
-
             let mut stack: VecDeque<Value> = VecDeque::new();
             let mut str_builder = String::new();
             let iter = splice_control.iter().enumerate();
-
             let path_info: &PathInfo = &PathInfo::new();
 
             for (index, c) in iter {
@@ -892,37 +636,6 @@ mod tests {
                 character: 1,
             })
             .await;
-        assert_eq!(result, None);
-    }
-
-    #[tokio::test]
-    async fn test_get_boundary_indices() {
-        let completer = Completer::from(EXAMPLE1.into());
-
-        let v: usize = completer
-            .document
-            .get_content_index(&Position {
-                line: 16,
-                character: 6,
-            })
-            .await
-            .unwrap();
-
-        let result = completer.get_boundary_indices(v).await;
-        let (l, r) = result.unwrap();
-        let lc = completer.document.get_char(l).await.unwrap();
-        let rc = completer.document.get_char(r).await.unwrap();
-        assert_eq!((lc.as_ref(), rc.as_ref()), ("\"", "}"));
-
-        let v = completer
-            .document
-            .get_content_index(&Position {
-                line: 6,
-                character: 3,
-            })
-            .await
-            .unwrap();
-        let result = completer.get_boundary_indices(v).await;
         assert_eq!(result, None);
     }
 

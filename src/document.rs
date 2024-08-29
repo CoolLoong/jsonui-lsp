@@ -1,8 +1,11 @@
-use std::sync::Arc;
+use std::{collections::VecDeque, sync::Arc};
 
+use log::trace;
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{DidChangeTextDocumentParams, Position};
 use unicode_segmentation::UnicodeSegmentation;
+
+use crate::completion::Token;
 
 #[derive(Debug)]
 pub struct Document {
@@ -24,7 +27,7 @@ impl Document {
         Self {
             line_info_cache: Self::init_line_info_cache(str),
             content_cache: Mutex::new(content),
-            content_chars: Mutex::new(content_chars)
+            content_chars: Mutex::new(content_chars),
         }
     }
 
@@ -32,11 +35,11 @@ impl Document {
         Mutex::new(Self::build_line_info_cache(content))
     }
 
-    pub async fn get_char(&self, index: usize) -> Option<Arc<str>>{
+    pub async fn get_char(&self, index: usize) -> Option<Arc<str>> {
         let chars = self.content_chars.lock().await;
-        if index >= chars.len(){
+        if index >= chars.len() {
             None
-        }else{
+        } else {
             Some(chars[index].clone())
         }
     }
@@ -48,20 +51,25 @@ impl Document {
         replacement: Arc<str>,
     ) {
         let mut chars = self.content_chars.lock().await;
-        if start_idx > end_idx || start_idx > chars.len() || end_idx > chars.len(){
+        if start_idx > end_idx || start_idx > chars.len() || end_idx > chars.len() {
             panic!()
         }
-        
-        let (before, after) = if end_idx == start_idx{
+
+        let (before, after) = if end_idx == start_idx {
             chars.split_at(start_idx)
-        }else{
-            let (s,_) = chars.split_at(start_idx);
-            let (_,e) = chars.split_at(end_idx);
-            (s,e)
+        } else {
+            let (s, _) = chars.split_at(start_idx);
+            let (_, e) = chars.split_at(end_idx);
+            (s, e)
         };
         let mut result: Vec<Arc<str>> = Vec::new();
         result.extend_from_slice(before);
-        result.append(&mut replacement.graphemes(true).map(Arc::from).collect::<Vec<Arc<str>>>());
+        result.append(
+            &mut replacement
+                .graphemes(true)
+                .map(Arc::from)
+                .collect::<Vec<Arc<str>>>(),
+        );
         result.extend_from_slice(after);
 
         let mut content = self.content_cache.lock().await;
@@ -127,14 +135,87 @@ impl Document {
                 if let Some(si) = start_index
                     && let Some(ei) = end_index
                 {
-                    self.replace_grapheme_range(si, ei, Arc::from(e.text.as_str())).await;
-                    
+                    self.replace_grapheme_range(si, ei, Arc::from(e.text.as_str()))
+                        .await;
+
                     let mut line_cache = self.line_info_cache.lock().await;
                     let content = self.content_cache.lock().await;
                     *line_cache = Self::build_line_info_cache(&content);
                 }
             }
         }
+    }
+
+    pub async fn get_boundary_indices(&self, index: usize) -> Option<(usize, usize)> {
+        let content = self.content_chars.lock().await;
+        let (forward, backward) = content.split_at(index);
+        if forward.is_empty() || backward.is_empty() {
+            return None;
+        }
+        
+        let f_len = forward.len();
+        let mut left_boundary_char: &str = "{";
+        let mut right_boundary_char: &str = "}";
+        let mut start_index: Option<usize> = None;
+        let mut boundary_char_stack: VecDeque<&str> = VecDeque::new();
+        let mut forward_iter = forward.iter().rev().peekable().enumerate();
+        let mut collected_str = String::new();
+        while let Some((_, ch)) = forward_iter.next() {
+            let str = ch.as_ref();
+            if str == left_boundary_char {
+                if boundary_char_stack.is_empty() {
+                    let opt = forward_iter
+                        .by_ref()
+                        .skip_while(|(_, c)| c.as_ref() != "\"")
+                        .skip(1)
+                        .skip_while(|(_, c)| {
+                            if c.as_ref() != "\""{
+                                collected_str.push_str(c);
+                                true
+                            }else{
+                                false
+                            }
+                        })
+                        .nth(1);
+                    if let Some((index, _)) = opt {
+                        if collected_str == "sgnidnib" || collected_str == "slortnoc"{
+                            forward_iter = forward.iter().rev().peekable().enumerate();
+                            left_boundary_char = "[";
+                            right_boundary_char = "]";
+                            continue;
+                        }
+                        start_index = Some(f_len - index);
+                        break;
+                    } else {
+                        return None;
+                    }
+                } else {
+                    boundary_char_stack.pop_back();
+                }
+            } else if str == right_boundary_char {
+                boundary_char_stack.push_back(str);
+            }
+        }
+        let start_index_v = start_index?;
+        boundary_char_stack.clear();
+
+        let mut end_index: Option<usize> = None;
+        let backend_iter = backward.iter().peekable().enumerate();
+        for (index, ch) in backend_iter {
+            let str = ch.as_ref();
+            if str == right_boundary_char {
+                if boundary_char_stack.is_empty() {
+                    end_index = Some(index + f_len);
+                    break;
+                } else {
+                    boundary_char_stack.pop_back();
+                }
+            } else if str == left_boundary_char {
+                boundary_char_stack.push_back(str);
+            }
+        }
+        let end_index_v = end_index?;
+        Some((start_index_v, end_index_v))
     }
 }
 
@@ -244,11 +325,43 @@ mod tests {
     #[tokio::test]
     async fn test_replace_grapheme_range() {
         let document = Document::from(&"hello 世界".to_string());
-        document.replace_grapheme_range(5, 5, Arc::from("MMM")).await;
+        document
+            .replace_grapheme_range(5, 5, Arc::from("MMM"))
+            .await;
         assert_eq!(*document.content_cache.lock().await, "helloMMM 世界");
-        document.replace_grapheme_range(5, 8, Arc::from("XXX")).await;
+        document
+            .replace_grapheme_range(5, 8, Arc::from("XXX"))
+            .await;
         assert_eq!(*document.content_cache.lock().await, "helloXXX 世界");
         document.replace_grapheme_range(8, 8, Arc::from("D")).await;
         assert_eq!(*document.content_cache.lock().await, "helloXXXD 世界");
+    }
+
+    #[tokio::test]
+    async fn test_get_boundary_indices() {
+        let document = Document::from(&EXAMPLE1.to_string());
+        let v: usize = document
+            .get_content_index(&Position {
+                line: 16,
+                character: 6,
+            })
+            .await
+            .unwrap();
+
+        let result = document.get_boundary_indices(v).await;
+        let (l, r) = result.unwrap();
+        let lc = document.get_char(l).await.unwrap();
+        let rc = document.get_char(r).await.unwrap();
+        assert_eq!((lc.as_ref(), rc.as_ref()), ("\"", "}"));
+
+        let v = document
+            .get_content_index(&Position {
+                line: 6,
+                character: 3,
+            })
+            .await
+            .unwrap();
+        let result = document.get_boundary_indices(v).await;
+        assert_eq!(result, None);
     }
 }

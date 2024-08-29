@@ -3,7 +3,7 @@
 use completion::Completer;
 use flexi_logger::{LogSpecification, Logger, LoggerHandle};
 use jsonc_parser::{parse_to_serde_value, ParseOptions};
-use log::{debug, set_max_level, trace};
+use log::{set_max_level, trace};
 use serde_json::{json, Map, Value};
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -18,6 +18,7 @@ use walkdir::WalkDir;
 
 mod completion;
 mod document;
+mod completion_helper;
 
 const VANILLAPACK_DEFINE: &str = include_str!("../out/vanillapack_define_1.21.20.3.json");
 const JSONUI_DEFINE: &str = include_str!("../out/jsonui_define.json");
@@ -191,7 +192,6 @@ impl LanguageServer for Backend {
         if params.text_document.language_id != "json" {
             return;
         }
-        debug!("open new file");
 
         let content: String = params.text_document.text.as_str().chars().collect();
         let arc_content: Arc<str> = Arc::from(content);
@@ -218,16 +218,13 @@ impl LanguageServer for Backend {
 
     /// do insert namespace and cache_type map for save file
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
-        trace!("did_save {}", &params.text_document.uri.path());
-        self.process_workspace_file_by_url(&params.text_document.uri)
-            .await;
+        self.process_workspace_file_by_url(&params.text_document.uri).await;
     }
 
     /// do insert namespace and cache_type map for create file
     async fn did_create_files(&self, params: CreateFilesParams) {
         for i in params.files.iter() {
             if let Ok(url) = Url::parse(&i.uri) {
-                debug!("did_create_file {}", &url);
                 self.process_workspace_file_by_url(&url).await;
             }
         }
@@ -244,7 +241,6 @@ impl LanguageServer for Backend {
                 let hn = hash_uri(&n_url);
                 if let Some((_, v)) = idmap.remove_entry(&ho) {
                     idmap.insert(hn, v);
-                    debug!("did_rename_file update \nold {}\n new {}", &o_url, &n_url);
                 }
             }
         }
@@ -259,7 +255,6 @@ impl LanguageServer for Backend {
                 if let Some((_, v)) = idmap.remove_entry(&x) {
                     let mut ct = self.cache_type_map.lock().await;
                     ct.remove(v.as_ref());
-                    debug!("did_delete_file {}", &url);
                 }
             }
         }
@@ -267,8 +262,6 @@ impl LanguageServer for Backend {
 
     /// do clean completer for close file
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        debug!("close a file");
-
         let url = &params.text_document.uri;
         let hash_value = hash_uri(url);
 

@@ -1,11 +1,24 @@
 {
   "common": [
     "type",
-    "controls",
+    "size",
+    "offset",
+    "layer",
+    "min_size",
+    "max_size",
+    "anchor_from",
+    "anchor_to",
     "visible",
     "enabled",
     "ignored",
+    "controls",
+    "bindings",
+    "variables",
     "alpha",
+    "inherit_max_sibling_width",
+    "inherit_max_sibling_height",
+    "use_anchored_offset",
+    "follows_cursor",
     "propagate_alpha",
     "clips_children",
     "allow_clipping",
@@ -13,10 +26,489 @@
     "clip_state_change_event",
     "enable_scissor_test",
     "selected",
-    "variables",
     "modifications",
     "property_bag"
   ],
+  "bindings_properties": ["binding_type", "ignored"],
+  "none": ["binding_name", "binding_name_override", "binding_condition"],
+  "global": ["binding_name", "binding_name_override", "binding_condition"],
+  "collection": [
+    "binding_name",
+    "binding_name_override",
+    "binding_collection_name",
+    "binding_condition"
+  ],
+  "collection_details": [
+    "binding_collection_name",
+    "binding_collection_prefix",
+    "binding_condition"
+  ],
+  "view": [
+    "source_control_name",
+    "source_property_name",
+    "target_property_name",
+    "resolve_sibling_scope"
+  ],
+  "resolve_sibling_scope": {
+    "description": {
+      "zh-cn": "是否解析兄弟作用域",
+      "en-us": "whether resolve sibling scopes"
+    },
+    "values": [
+      {
+        "label": "true",
+        "kind": 12,
+        "insert_text_format": 1
+      },
+      {
+        "label": "false",
+        "kind": 12,
+        "insert_text_format": 1
+      }
+    ]
+  },
+  "source_control_name": {
+    "description": {
+      "zh-cn": "被读取的指定控件名称",
+      "en-us": "control name"
+    },
+    "values": [
+      {
+        "label": "value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "\"$0\""
+      }
+    ]
+  },
+  "source_property_name": {
+    "description": {
+      "zh-cn": "引用的绑定",
+      "en-us": "source property"
+    },
+    "values": [
+      {
+        "label": "value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "\"$0\""
+      }
+    ]
+  },
+  "target_property_name": {
+    "description": {
+      "zh-cn": "覆盖的绑定",
+      "en-us": "target property"
+    },
+    "values": [
+      {
+        "label": "value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "\"$0\""
+      }
+    ]
+  },
+  "binding_name": {
+    "description": {
+      "zh-cn": "绑定名称",
+      "en-us": "bingding name"
+    },
+    "values": [
+      {
+        "label": "value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "\"$0\""
+      }
+    ]
+  },
+  "binding_name_override": {
+    "description": {
+      "zh-cn": "覆盖的绑定",
+      "en-us": "bingding name"
+    },
+    "values": [
+      {
+        "label": "value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "\"$0\""
+      }
+    ]
+  },
+  "binding_collection_prefix": {
+    "description": {
+      "zh-cn": "绑定合集前缀",
+      "en-us": "binding collection prefix"
+    },
+    "values": [
+      {
+        "label": "value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "\"$0\""
+      }
+    ]
+  },
+  "binding_collection_name": {
+    "description": {
+      "zh-cn": "绑定合集名",
+      "en-us": "binding collection name"
+    },
+    "values": [
+      {
+        "label": "form_buttons",
+        "description": {
+          "zh-cn": "表单按钮集合",
+          "en-us": "form buttons"
+        }
+      },
+      {
+        "label": "container_items",
+        "description": {
+          "zh-cn": "容器物品集合",
+          "en-us": "container items"
+        }
+      },
+      {
+        "label": "slots_collection",
+        "description": {
+          "zh-cn": "slots集合",
+          "en-us": "slots collection"
+        }
+      }
+    ]
+  },
+  "binding_condition": {
+    "description": {
+      "zh-cn": "绑定条件",
+      "en-us": "binding condition"
+    },
+    "values": [
+      {
+        "label": "none",
+        "description": {
+          "zh-cn": "none",
+          "en-us": "none"
+        }
+      },
+      {
+        "label": "once",
+        "description": {
+          "zh-cn": "仅一次",
+          "en-us": "once"
+        }
+      },
+      {
+        "label": "always",
+        "description": {
+          "zh-cn": "总是",
+          "en-us": "always"
+        }
+      },
+      {
+        "label": "visible",
+        "description": {
+          "zh-cn": "可见时",
+          "en-us": "visible"
+        }
+      },
+      {
+        "label": "always_when_visible",
+        "description": {
+          "zh-cn": "总是在可见时",
+          "en-us": "always when visible"
+        }
+      },
+      {
+        "label": "visibility_changed",
+        "description": {
+          "zh-cn": "可见性改变时",
+          "en-us": "visibility changed"
+        }
+      }
+    ]
+  },
+  "binding_type": {
+    "description": {
+      "zh-cn": "定义绑定的类型",
+      "en-us": "define the binding type"
+    },
+    "values": [
+      {
+        "label": "view",
+        "description": {
+          "zh-cn": "view",
+          "en-us": "view"
+        }
+      },
+      {
+        "label": "collection",
+        "description": {
+          "zh-cn": "collection",
+          "en-us": "collection"
+        }
+      },
+      {
+        "label": "collection_details",
+        "description": {
+          "zh-cn": "collection details",
+          "en-us": "collection details"
+        }
+      },
+      {
+        "label": "global",
+        "description": {
+          "zh-cn": "global",
+          "en-us": "global"
+        }
+      },
+      {
+        "label": "none",
+        "description": {
+          "zh-cn": "none",
+          "en-us": "none"
+        }
+      }
+    ]
+  },
+  "size": {
+    "description": {
+      "zh-cn": "控件大小",
+      "en-us": "control size"
+    },
+    "values": [
+      {
+        "label": "str value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "[\"$1\", \"$0\"]"
+      },
+      {
+        "label": "number value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "[$1, $0]"
+      }
+    ]
+  },
+  "offset": {
+    "description": {
+      "zh-cn": "控件偏移量",
+      "en-us": "control offset"
+    },
+    "values": [
+      {
+        "label": "str value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "[\"$1\", \"$0\"]"
+      },
+      {
+        "label": "number value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "[$1, $0]"
+      }
+    ]
+  },
+  "min_size": {
+    "description": {
+      "zh-cn": "最小大小",
+      "en-us": "min size"
+    },
+    "values": [
+      {
+        "label": "str value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "[\"$1\", \"$0\"]"
+      },
+      {
+        "label": "number value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "[$1, $0]"
+      }
+    ]
+  },
+  "max_size": {
+    "description": {
+      "zh-cn": "最大大小",
+      "en-us": "max size"
+    },
+    "values": [
+      {
+        "label": "str value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "[\"$1\", \"$0\"]"
+      },
+      {
+        "label": "number value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "[$1, $0]"
+      }
+    ]
+  },
+  "anchor_from": {
+    "description": {
+      "zh-cn": "父锚点",
+      "en-us": "anchor from"
+    },
+    "values": [
+      {
+        "label": "top_left",
+        "description": {
+          "zh-cn": "左上角",
+          "en-us": "top left"
+        }
+      },
+      {
+        "label": "top_middle",
+        "description": {
+          "zh-cn": "正上方",
+          "en-us": "top middle"
+        }
+      },
+      {
+        "label": "top_right",
+        "description": {
+          "zh-cn": "右上角",
+          "en-us": "top middle"
+        }
+      },
+      {
+        "label": "left_middle",
+        "description": {
+          "zh-cn": "正左方",
+          "en-us": "left middle"
+        }
+      },
+      {
+        "label": "center",
+        "description": {
+          "zh-cn": "正中间",
+          "en-us": "center"
+        }
+      },
+      {
+        "label": "right_middle",
+        "description": {
+          "zh-cn": "正右方",
+          "en-us": "right middle"
+        }
+      },
+      {
+        "label": "bottom_left",
+        "description": {
+          "zh-cn": "左下角",
+          "en-us": "bottom left"
+        }
+      },
+      {
+        "label": "bottom_middle",
+        "description": {
+          "zh-cn": "正下方",
+          "en-us": "bottom middle"
+        }
+      },
+      {
+        "label": "bottom_right",
+        "description": {
+          "zh-cn": "右下角",
+          "en-us": "bottom right"
+        }
+      }
+    ]
+  },
+  "anchor_to": {
+    "description": {
+      "zh-cn": "子锚点",
+      "en-us": "anchor to"
+    },
+    "values": [
+      {
+        "label": "top_left",
+        "description": {
+          "zh-cn": "左上角",
+          "en-us": "top left"
+        }
+      },
+      {
+        "label": "top_middle",
+        "description": {
+          "zh-cn": "正上方",
+          "en-us": "top middle"
+        }
+      },
+      {
+        "label": "top_right",
+        "description": {
+          "zh-cn": "右上角",
+          "en-us": "top middle"
+        }
+      },
+      {
+        "label": "left_middle",
+        "description": {
+          "zh-cn": "正左方",
+          "en-us": "left middle"
+        }
+      },
+      {
+        "label": "center",
+        "description": {
+          "zh-cn": "正中间",
+          "en-us": "center"
+        }
+      },
+      {
+        "label": "right_middle",
+        "description": {
+          "zh-cn": "正右方",
+          "en-us": "right middle"
+        }
+      },
+      {
+        "label": "bottom_left",
+        "description": {
+          "zh-cn": "左下角",
+          "en-us": "bottom left"
+        }
+      },
+      {
+        "label": "bottom_middle",
+        "description": {
+          "zh-cn": "正下方",
+          "en-us": "bottom middle"
+        }
+      },
+      {
+        "label": "bottom_right",
+        "description": {
+          "zh-cn": "右下角",
+          "en-us": "bottom right"
+        }
+      }
+    ]
+  },
+  "layer": {
+    "description": {
+      "zh-cn": "控件层级",
+      "en-us": "layer value"
+    },
+    "values": [
+      {
+        "label": "value",
+        "kind": 12,
+        "insert_text_format": 1,
+        "insert_text": "0"
+      }
+    ]
+  },
   "alpha": {
     "description": {
       "zh-cn": "控件的不透明度",
@@ -35,6 +527,78 @@
     "description": {
       "zh-cn": "定义控件是否开启",
       "en-us": "whether the control enabled"
+    },
+    "values": [
+      {
+        "label": "true",
+        "kind": 12,
+        "insert_text_format": 1
+      },
+      {
+        "label": "false",
+        "kind": 12,
+        "insert_text_format": 1
+      }
+    ]
+  },
+  "inherit_max_sibling_width": {
+    "description": {
+      "zh-cn": "是否使用最大的同胞控件的宽度",
+      "en-us": "whether inherit the max sibling width"
+    },
+    "values": [
+      {
+        "label": "true",
+        "kind": 12,
+        "insert_text_format": 1
+      },
+      {
+        "label": "false",
+        "kind": 12,
+        "insert_text_format": 1
+      }
+    ]
+  },
+  "inherit_max_sibling_height": {
+    "description": {
+      "zh-cn": "是否使用最大的同胞控件的高度",
+      "en-us": "whether inherit the max sibling height"
+    },
+    "values": [
+      {
+        "label": "true",
+        "kind": 12,
+        "insert_text_format": 1
+      },
+      {
+        "label": "false",
+        "kind": 12,
+        "insert_text_format": 1
+      }
+    ]
+  },
+  "use_anchored_offset": {
+    "description": {
+      "zh-cn": "是否让子控件使用该控件的锚点",
+      "en-us": "whether child controls use parent anchored"
+    },
+    "values": [
+      {
+        "label": "true",
+        "kind": 12,
+        "insert_text_format": 1
+      },
+      {
+        "label": "false",
+        "kind": 12,
+        "insert_text_format": 1
+      }
+    ]
+  },
+  "follows_cursor": {
+    "description": {
+      "zh-cn": "控件是否能跟随光标",
+      "en-us": "whether the control follow the cursor"
     },
     "values": [
       {
@@ -212,6 +776,40 @@
         "kind": 15,
         "insert_text_format": 2,
         "insert_text": "[\n\t{\n\t\t\"$0\"\n\t}\n]"
+      }
+    ]
+  },
+  "bindings": {
+    "description": {
+      "zh-cn": "添加绑定",
+      "en-us": "Add bindings"
+    },
+    "values": [
+      {
+        "label": "value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "[\n\t{\n\t\t$0\n\t}\n]"
+      }
+    ]
+  },
+  "variables": {
+    "description": {
+      "zh-cn": "创建变量",
+      "en-us": "create variables"
+    },
+    "values": [
+      {
+        "label": "single",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "{\"requires\": \"$1\",\"$2\": \"$3\"}"
+      },
+      {
+        "label": "multiple",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "[\n\t{\"requires\": \"$1\",\"$2\": \"$3\"}\n]"
       }
     ]
   },
