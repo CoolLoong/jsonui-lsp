@@ -1,11 +1,9 @@
 use std::{collections::VecDeque, sync::Arc};
 
-use log::trace;
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{DidChangeTextDocumentParams, Position};
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::completion::Token;
 
 #[derive(Debug)]
 pub struct Document {
@@ -221,7 +219,7 @@ impl Document {
 
 #[cfg(test)]
 mod tests {
-    use log::debug;
+    
     use tower_lsp::lsp_types::{
         Range, TextDocumentContentChangeEvent, Url, VersionedTextDocumentIdentifier,
     };

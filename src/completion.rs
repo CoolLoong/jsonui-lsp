@@ -2,19 +2,16 @@ use crate::{completion_helper::create_completion, document::Document};
 use crate::Backend;
 use log::{debug, trace};
 use std::{
-    borrow::Borrow,
-    cell::{Cell, RefCell},
-    collections::{HashMap, VecDeque},
-    fmt::{self, format},
-    rc::Rc,
+    cell::RefCell,
+    collections::VecDeque,
+    fmt::{self},
     sync::Arc,
     vec,
 };
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionParams,
-    DidChangeTextDocumentParams, Documentation, InsertTextFormat, MarkupContent, Position, Range,
-    TextEdit,
+    CompletionItem, CompletionParams,
+    DidChangeTextDocumentParams,
 };
 
 #[derive(Debug, PartialEq, Clone)]

@@ -1,6 +1,5 @@
-use crate::completion::{CompleteContext, Node, Value, TYPE_ARR, TYPE_COL, TYPE_CR, TYPE_STR};
+use crate::completion::{CompleteContext, Node, Value, TYPE_ARR, TYPE_COL, TYPE_CR};
 use log::trace;
-use serde::de;
 use std::collections::HashMap;
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionParams,
@@ -133,8 +132,7 @@ fn create_type_completion(
                     label_details: Some(CompletionItemLabelDetails {
                         description: des
                             .get(lang)
-                            .or(des.get("en-us"))
-                            .map_or(None, |f| f.as_str().map_or(None, |ff| Some(ff.to_string()))),
+                            .or(des.get("en-us")).and_then(|f| f.as_str().map(|ff| ff.to_string())),
                         ..Default::default()
                     }),
                     kind: Some(CompletionItemKind::TEXT),
@@ -178,7 +176,7 @@ fn create_value_completion(
         for (index, i) in values.iter().enumerate() {
             let value = i.as_object().unwrap();
             let des = value.get("description");
-            let insert_text_format = value.get("insert_text_format").map_or(None, |k| {
+            let insert_text_format = value.get("insert_text_format").and_then(|k| {
                 from_number_to_insert_text_format(k.as_u64().unwrap())
             });
             if input_c == "\""
@@ -192,25 +190,23 @@ fn create_value_completion(
                 label_details: Some(CompletionItemLabelDetails {
                     description: des.map_or(Some("jsonui support".to_string()), |d| {
                         d.get(lang)
-                            .or(d.get("en-us"))
-                            .map_or(None, |f| f.as_str().map_or(None, |ff| Some(ff.to_string())))
+                            .or(d.get("en-us")).and_then(|f| f.as_str().map(|ff| ff.to_string()))
                     }),
                     detail: None,
                 }),
-                kind: value.get("kind").map_or(None, |k| {
+                kind: value.get("kind").and_then(|k| {
                     from_number_to_completion_item_kind(k.as_u64().unwrap())
                 }),
                 insert_text_format,
                 insert_text: value
                     .get("insert_text")
-                    .or(value.get("label"))
-                    .map_or(None, |k| {
+                    .or(value.get("label")).map(|k| {
                         if input_c == ":" && insert_text_format.is_some() {
-                            Some(format!(" {}", k.as_str().unwrap()))
+                            format!(" {}", k.as_str().unwrap())
                         } else if input_c == ":" {
-                            Some(format!(" \"{}\"", k.as_str().unwrap()))
+                            format!(" \"{}\"", k.as_str().unwrap())
                         } else {
-                            Some(k.as_str().unwrap().to_string())
+                            k.as_str().unwrap().to_string()
                         }
                     }),
                 preselect: Some(true),

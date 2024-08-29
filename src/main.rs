@@ -331,7 +331,7 @@ impl Backend {
             idmap.entry(hash_value).or_insert(Arc::from(v));
             return Ok(());
         }
-        Err(Self::namespace_not_find_error(&self, url.path()))
+        Err(Self::namespace_not_find_error(self, url.path()))
     }
 
     async fn insert_namespace(&self, url: &Url, namespace: Arc<str>) {
