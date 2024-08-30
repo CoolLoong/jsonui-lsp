@@ -1,6 +1,8 @@
-use crate::{completion_helper::create_completion, document::Document};
+use crate::completion_helper::from_color_value_to_color_arr;
 use crate::Backend;
+use crate::{completion_helper::create_completion, document::Document};
 use log::{debug, trace};
+use std::borrow::Borrow;
 use std::{
     cell::RefCell,
     collections::VecDeque,
@@ -10,8 +12,8 @@ use std::{
 };
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionParams,
-    DidChangeTextDocumentParams,
+    Color, ColorInformation, CompletionItem, CompletionParams, DidChangeTextDocumentParams,
+    DocumentColorParams, Position, Range, Url,
 };
 
 #[derive(Debug, PartialEq, Clone)]
@@ -242,7 +244,6 @@ pub(crate) struct Completer {
     ast: Mutex<Option<Vec<Value>>>,
 }
 
-
 impl Completer {
     pub fn from(str: Arc<str>) -> Self {
         Completer {
@@ -253,16 +254,17 @@ impl Completer {
 
     async fn fill_context<'a>(
         bk: &Backend,
-        param: &CompletionParams,
-        input: &'a [Value],
+        ast: &'a [Value],
+        docs_url: &Url,
         context: &'a CompleteContext<'a>,
     ) {
-        //find the neighbors node corresponding to the current index
+        //fill context from ast
         let mut result = Vec::new();
-        Self::flatten_ast(input, &mut result);
+        Self::flatten_ast(ast, &mut result);
         let v_index = *context.index.lock().await;
         let node_index = result.iter().rposition(|value| value.r <= v_index);
 
+        //find the neighbors node corresponding to the current index
         let mut neighbors: Vec<Option<&'a Value>> = Vec::with_capacity(5);
         if let Some(i) = node_index {
             let i = i as i32;
@@ -279,7 +281,7 @@ impl Completer {
 
         //find control_type by context
         result.clear();
-        Self::flatten_ast_one_layer(input, &mut result);
+        Self::flatten_ast_one_layer(ast, &mut result);
         for (index, i) in result.iter().enumerate() {
             if i.type_id == TYPE_STR
                 && let Some(Node::String(v)) = &i.v
@@ -296,15 +298,14 @@ impl Completer {
 
         let mut control_type_mut = context.control_type.lock().await;
         if control_type_mut.is_none()
-            && let Some(Node::String(control_name)) = &input[0].v
+            && let Some(Node::String(control_name)) = &ast[0].v
         {
-            let url = &param.text_document_position.text_document.uri;
-            let namespace: Option<Arc<str>> = bk.query_namespace(url).await;
+            let namespace: Option<Arc<str>> = bk.query_namespace(docs_url).await;
             let control_t = Self::fill_control_type(bk, namespace, control_name).await;
             if let Some(v) = control_t {
                 *control_type_mut = Some(Arc::from(v.as_str()));
             } else {
-                trace!("cant find type from type_cache {:?}", input[0].v);
+                trace!("cant find type from type_cache {:?}", ast[0].v);
             }
         }
     }
@@ -337,25 +338,16 @@ impl Completer {
         None
     }
 
-    
-    pub async fn compelte(
-        &self,
-        bk: &Backend,
-        param: &CompletionParams,
-    ) -> Option<Vec<CompletionItem>> {
-        let pos = &param.text_document_position.position;
-
+    pub async fn update_ast<'a>(&self, context: &'a CompleteContext<'a>, pos: &Position) {
         // get current index in content
-        let context: CompleteContext = CompleteContext::empty();
-        let index = self.document.get_content_index(pos).await;
+        let index = self.document.get_index_from_position(pos).await;
         let index_value;
         if let Some(index_v) = index {
             *context.index.lock().await = index_v;
             index_value = index_v;
         } else {
-            return None;
+            return;
         }
-
         //write the input char currently
         {
             let input_char_index = index_value - 1;
@@ -363,35 +355,92 @@ impl Completer {
                 *context.input_char.lock().await = cr;
             }
         }
+        self.build_ast(index_value, context).await;
+    }
 
-        //check ast whether dirty
-        let cache_miss = {
+    pub async fn compelte(
+        &self,
+        bk: &Backend,
+        param: &CompletionParams,
+    ) -> Option<Vec<CompletionItem>> {
+        let context: CompleteContext = CompleteContext::empty();
+        self.update_ast(&context, &param.text_document_position.position)
+            .await;
+
+        let ast_lock = self.ast.lock().await;
+        if let Some(ast) = ast_lock.as_ref() {
+            Self::fill_context(
+                bk,
+                ast,
+                &param.text_document_position.text_document.uri,
+                &context,
+            )
+            .await;
+            let lang = bk.lang.lock().await;
+            create_completion(lang.as_ref(), &bk.jsonui_define_map, param, &context, ast).await
+        } else {
+            None
+        }
+    }
+
+    pub async fn complete_color(&self) -> Option<Vec<ColorInformation>> {
+        trace!("complete_color");
+        let pos = {
             let ast = self.ast.lock().await;
-            if let Some(ast) = ast.as_ref() {
-                !ast.iter().any(|f| f.l <= index_value && index_value <= f.r)
+            if ast.is_none() {
+                return None;
+            }
+            let inputs: &Vec<Value> = ast.as_ref().unwrap();
+            if inputs.len() > 2
+                && let Some(pos) = self.document.get_position_from_index(inputs[2].l + 1).await
+            {
+                Some(pos)
             } else {
-                true
+                None
             }
         };
-        if cache_miss {
-            self.build_ast(index_value, &context).await;
+        if let Some(pos_v) = pos{
+            let context: CompleteContext = CompleteContext::empty();
+            self.update_ast(&context, &pos_v).await;
+        }else{
+            return None;
         }
-
-        //fill context from ast
+        
         let ast = self.ast.lock().await;
         if ast.is_none() {
             return None;
         }
-        let ast: &Vec<Value> = ast.as_ref().unwrap();
-        Self::fill_context(bk, param, ast, &context).await;
-        let lang = bk.lang.lock().await;
-        create_completion(lang.as_ref(), &bk.jsonui_define_map, param, &context, ast).await
-    }
+        let inputs: &Vec<Value> = ast.as_ref().unwrap();
+        let mut results = Vec::new();
+        Self::flatten_ast(inputs, &mut results);
 
-    pub async fn update_ast(&self) {
-        let mut ast = self.ast.lock().await;
-        if ast.is_some() {
-            *ast = None
+        let mut color_infos = Vec::new();
+        let mut iter = results.iter();
+        while let Some(color_v) = iter
+            .by_ref()
+            .skip_while(|r| !matches!(&r.v, Some(Node::String(v)) if v.as_ref() == "color"))
+            .nth(2)
+        {
+            if let (Some(left_v), Some(right_v)) = (
+                self.document.get_position_from_index(color_v.l).await,
+                self.document.get_position_from_index(color_v.r).await,
+            ) {
+                if let Some(color) = from_color_value_to_color_arr(color_v) {
+                    color_infos.push(ColorInformation {
+                        range: Range {
+                            start: left_v,
+                            end: right_v,
+                        },
+                        color,
+                    });
+                }
+            }
+        }
+
+        if color_infos.is_empty() {
+            None
+        } else {
+            Some(color_infos)
         }
     }
 
@@ -617,7 +666,7 @@ mod tests {
         let completer = Completer::from(EXAMPLE1.into());
         let index = completer
             .document
-            .get_content_index(&Position {
+            .get_index_from_position(&Position {
                 line: 16,
                 character: 5,
             })
@@ -628,7 +677,7 @@ mod tests {
 
         let result = completer
             .document
-            .get_content_index(&Position {
+            .get_index_from_position(&Position {
                 line: 44,
                 character: 1,
             })
@@ -639,33 +688,32 @@ mod tests {
     #[tokio::test]
     async fn test_build_ast() {
         let completer = Completer::from(EXAMPLE1.into());
-        let v = completer
-            .document
-            .get_content_index(&Position {
-                line: 16,
-                character: 5,
-            })
-            .await
-            .unwrap();
         let context = &CompleteContext::empty();
-        completer.build_ast(v, context).await;
+        completer
+            .update_ast(
+                context,
+                &Position {
+                    line: 16,
+                    character: 5,
+                },
+            )
+            .await;
         {
             let result = completer.ast.lock().await;
             assert!(result.is_some());
         }
 
-        let v = completer
-            .document
-            .get_content_index(&Position {
-                line: 0,
-                character: 1,
-            })
-            .await
-            .unwrap();
-
         let completer = Completer::from(EXAMPLE1.into());
         let context = &CompleteContext::empty();
-        completer.build_ast(v, context).await;
+        completer
+            .update_ast(
+                context,
+                &Position {
+                    line: 0,
+                    character: 1,
+                },
+            )
+            .await;
         let result = completer.ast.lock().await;
         assert!(result.is_none());
     }

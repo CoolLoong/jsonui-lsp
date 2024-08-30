@@ -17,8 +17,8 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 use walkdir::WalkDir;
 
 mod completion;
-mod document;
 mod completion_helper;
+mod document;
 
 const VANILLAPACK_DEFINE: &str = include_str!("../out/vanillapack_define_1.21.20.3.json");
 const JSONUI_DEFINE: &str = include_str!("../out/jsonui_define.json");
@@ -114,9 +114,9 @@ impl LanguageServer for Backend {
         trace!("client lang is {}", json!(client_lang));
         *self.lang.lock().await = Arc::from(client_lang.as_str().unwrap());
 
-        let workspace_folders: std::path::PathBuf =
-            param.root_uri.unwrap().to_file_path().unwrap();
-        self.init_workspace(workspace_folders).await;
+        if let Some(root_url) = param.root_uri && let Ok(workspace) = root_url.to_file_path(){
+            self.init_workspace(workspace).await;
+        }
 
         let file_operation_filters = vec![FileOperationFilter {
             scheme: Some("file".to_string()),
@@ -164,11 +164,56 @@ impl LanguageServer for Backend {
                         will_delete: None,
                     }),
                 }),
-                signature_help_provider: None,
-                hover_provider: None,
+                color_provider: Some(ColorProviderCapability::Options(
+                    StaticTextDocumentColorProviderOptions {
+                        document_selector: Some(vec![DocumentFilter {
+                            language: Some("json".to_string()),
+                            scheme: None,
+                            pattern: None,
+                        }]),
+                        id: None,
+                    },
+                )),
                 ..ServerCapabilities::default()
             },
         })
+    }
+
+    async fn document_color(&self, params: DocumentColorParams) -> Result<Vec<ColorInformation>> {
+        let cmp = self.completers.lock().await;
+        let url = &params.text_document.uri;
+        let hash_value = hash_uri(url);
+
+        let cmp_v = cmp.get(&hash_value);
+        if let Some(vv) = cmp_v {
+            if let Some(result) = vv.complete_color().await {
+                return Ok(result);
+            }
+        }
+        Ok(vec![])
+    }
+
+    async fn color_presentation(
+        &self,
+        params: ColorPresentationParams,
+    ) -> Result<Vec<ColorPresentation>> {
+        let ColorPresentationParams { color, range,.. } = params;
+        let color_presentation = ColorPresentation {
+            label: format!(
+                "rgba({:.3}, {:.3}, {:.3}, {:.3})",
+                color.red, color.green, color.blue, color.alpha
+            ),
+            text_edit: Some(TextEdit {
+                range,
+                new_text: format!(
+                    "[{:.3}, {:.3}, {:.3}, {:.3}]",
+                    color.red, color.green, color.blue, color.alpha
+                ),
+            }),
+            additional_text_edits: None,
+        };
+
+        Ok(vec![color_presentation])
     }
 
     async fn initialized(&self, _: InitializedParams) {
@@ -207,18 +252,19 @@ impl LanguageServer for Backend {
 
     // trigger in file change
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        trace!("did_change");
         let url = &params.text_document.uri;
         let key = hash_uri(url);
         let cmp_map = self.completers.lock().await;
         if let Some(cmp) = cmp_map.get(&key) {
             cmp.update_document(&params).await;
-            cmp.update_ast().await;
         }
     }
 
     /// do insert namespace and cache_type map for save file
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
-        self.process_workspace_file_by_url(&params.text_document.uri).await;
+        self.process_workspace_file_by_url(&params.text_document.uri)
+            .await;
     }
 
     /// do insert namespace and cache_type map for create file

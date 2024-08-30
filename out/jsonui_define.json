@@ -49,6 +49,148 @@
     "target_property_name",
     "resolve_sibling_scope"
   ],
+  "label": [
+    "text",
+    "font_size",
+    "font_type",
+    "font_scale_factor",
+    "color",
+    "localize",
+    "line_padding",
+    "text_alignment",
+    "locked_color",
+    "backup_font_type",
+    "shadow",
+    "hide_hyphen",
+    "notify_on_ellipses",
+    "enable_profanity_filter"
+  ],
+  "color": {
+    "description": {
+      "zh-cn": "文本颜色",
+      "en-us": "text color"
+    },
+    "values": [
+      {
+        "label": "value",
+        "kind": 16
+      }
+    ]
+  },
+  "text": {
+    "description": {
+      "zh-cn": "文本控件显示的文字",
+      "en-us": "text"
+    },
+    "values": [
+      {
+        "label": "value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "\"$0\""
+      }
+    ]
+  },
+  "font_type": {
+    "description": {
+      "zh-cn": "字体类型",
+      "en-us": "font type"
+    },
+    "values": [
+      {
+        "label": "default",
+        "description": {
+          "zh-cn": "默认",
+          "en-us": "default"
+        }
+      },
+      {
+        "label": "rune",
+        "description": {
+          "zh-cn": "银河字体",
+          "en-us": "rune"
+        }
+      },
+      {
+        "label": "MinecraftTen",
+        "description": {
+          "zh-cn": "MinecraftTen",
+          "en-us": "MinecraftTen"
+        }
+      },
+      {
+        "label": "unicode",
+        "description": {
+          "zh-cn": "unicode",
+          "en-us": "unicode"
+        }
+      },
+      {
+        "label": "smooth",
+        "description": {
+          "zh-cn": "平滑字体",
+          "en-us": "smooth"
+        }
+      },
+      {
+        "label": "OldSmoothFont",
+        "description": {
+          "zh-cn": "旧版平滑字体",
+          "en-us": "OldSmoothFont"
+        }
+      }
+    ]
+  },
+  "font_scale_factor": {
+    "description": {
+      "zh-cn": "字体缩放大小",
+      "en-us": "scale factor"
+    },
+    "values": [
+      {
+        "label": "value",
+        "kind": 12,
+        "insert_text_format": 1,
+        "insert_text": "1.0"
+      }
+    ]
+  },
+  "font_size": {
+    "description": {
+      "zh-cn": "字体大小",
+      "en-us": "font size"
+    },
+    "values": [
+      {
+        "label": "small",
+        "description": {
+          "zh-cn": "小",
+          "en-us": "small"
+        }
+      },
+      {
+        "label": "normal",
+        "description": {
+          "zh-cn": "正常",
+          "en-us": "normal"
+        }
+      },
+      {
+        "label": "large",
+        "description": {
+          "zh-cn": "大",
+          "en-us": "large"
+        }
+      },
+      {
+        "label": "extra_large",
+        "description": {
+          "zh-cn": "特大",
+          "en-us": "extra_large"
+        }
+      }
+    ]
+  },
   "resolve_sibling_scope": {
     "description": {
       "zh-cn": "是否解析兄弟作用域",
