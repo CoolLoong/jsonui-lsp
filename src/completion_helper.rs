@@ -2,7 +2,7 @@ use crate::completion::{CompleteContext, Node, Value, TYPE_ARR, TYPE_COL, TYPE_C
 use log::trace;
 use std::collections::HashMap;
 use tower_lsp::lsp_types::{
-    CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionParams,
+    Color, CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionParams,
     InsertTextFormat, Position, Range, TextEdit,
 };
 
@@ -13,7 +13,8 @@ fn create_binding_type_input(
 ) -> Vec<serde_json::Value> {
     let mut inputs: Vec<serde_json::Value> = vec![];
     let path = &current.path;
-    let binding_type: Option<&Value> = if path.len()>1 && let Some(Node::Array(arr)) = &ast[path[0]].v
+    let binding_type: Option<&Value> = if path.len() > 1
+        && let Some(Node::Array(arr)) = &ast[path[0]].v
         && let Some(Node::Controls(obj)) = &arr[path[1]].v
     {
         obj.iter()
@@ -55,7 +56,7 @@ pub(crate) async fn create_completion<'a>(
     context: &CompleteContext<'a>,
     ast: &Vec<Value>,
 ) -> Option<Vec<CompletionItem>> {
-    trace!("{:?}\n\n ast {:?}", context, ast);
+    trace!("{:?}\n\n ast {:?}\n--------------------------------", context, ast);
     let type_c = context.control_type.lock().await;
     let nodes = context.nodes.lock().await;
     let input_c = context.input_char.lock().await;
@@ -80,7 +81,7 @@ pub(crate) async fn create_completion<'a>(
             && (current_v.path.len() == 3 || current_v.type_id == TYPE_ARR)
         {
             trace!("create_bindings_type_completion");
-            let inputs = &create_binding_type_input(ast,define_map,current_v);
+            let inputs = &create_binding_type_input(ast, define_map, current_v);
             return create_type_completion(inputs, param, lang, define_map);
         }
     } else if let Some(nv1) = n1
@@ -132,7 +133,8 @@ fn create_type_completion(
                     label_details: Some(CompletionItemLabelDetails {
                         description: des
                             .get(lang)
-                            .or(des.get("en-us")).and_then(|f| f.as_str().map(|ff| ff.to_string())),
+                            .or(des.get("en-us"))
+                            .and_then(|f| f.as_str().map(|ff| ff.to_string())),
                         ..Default::default()
                     }),
                     kind: Some(CompletionItemKind::TEXT),
@@ -176,9 +178,9 @@ fn create_value_completion(
         for (index, i) in values.iter().enumerate() {
             let value = i.as_object().unwrap();
             let des = value.get("description");
-            let insert_text_format = value.get("insert_text_format").and_then(|k| {
-                from_number_to_insert_text_format(k.as_u64().unwrap())
-            });
+            let insert_text_format = value
+                .get("insert_text_format")
+                .and_then(|k| from_number_to_insert_text_format(k.as_u64().unwrap()));
             if input_c == "\""
                 && let Some(format) = insert_text_format
                 && format == InsertTextFormat::SNIPPET
@@ -190,25 +192,24 @@ fn create_value_completion(
                 label_details: Some(CompletionItemLabelDetails {
                     description: des.map_or(Some("jsonui support".to_string()), |d| {
                         d.get(lang)
-                            .or(d.get("en-us")).and_then(|f| f.as_str().map(|ff| ff.to_string()))
+                            .or(d.get("en-us"))
+                            .and_then(|f| f.as_str().map(|ff| ff.to_string()))
                     }),
                     detail: None,
                 }),
-                kind: value.get("kind").and_then(|k| {
-                    from_number_to_completion_item_kind(k.as_u64().unwrap())
-                }),
+                kind: value
+                    .get("kind")
+                    .and_then(|k| from_number_to_completion_item_kind(k.as_u64().unwrap())),
                 insert_text_format,
-                insert_text: value
-                    .get("insert_text")
-                    .or(value.get("label")).map(|k| {
-                        if input_c == ":" && insert_text_format.is_some() {
-                            format!(" {}", k.as_str().unwrap())
-                        } else if input_c == ":" {
-                            format!(" \"{}\"", k.as_str().unwrap())
-                        } else {
-                            k.as_str().unwrap().to_string()
-                        }
-                    }),
+                insert_text: value.get("insert_text").or(value.get("label")).map(|k| {
+                    if input_c == ":" && insert_text_format.is_some() {
+                        format!(" {}", k.as_str().unwrap())
+                    } else if input_c == ":" {
+                        format!(" \"{}\"", k.as_str().unwrap())
+                    } else {
+                        k.as_str().unwrap().to_string()
+                    }
+                }),
                 preselect: Some(true),
                 sort_text: Some(format!("00{}", index + 1)),
                 ..Default::default()
@@ -221,6 +222,126 @@ fn create_value_completion(
     } else {
         Some(result)
     }
+}
+
+pub(crate) fn from_color_value_to_color_arr(v: &Value) -> Option<Color> {
+    if let Some(Node::String(color_str)) = &v.v {
+        return match color_str.as_ref() {
+            "white" => Some(Color {
+                red: 1.0,
+                green: 1.0,
+                blue: 1.0,
+                alpha: 1.0,
+            }),
+            "silver" => Some(Color {
+                red: 0.776,
+                green: 0.776,
+                blue: 0.776,
+                alpha: 1.0,
+            }),
+            "gray grey" => Some(Color {
+                red: 0.333,
+                green: 0.333,
+                blue: 0.333,
+                alpha: 1.0,
+            }),
+            "black" => Some(Color {
+                red: 0.0,
+                green: 0.0,
+                blue: 0.0,
+                alpha: 1.0,
+            }),
+            "red" => Some(Color {
+                red: 1.0,
+                green: 0.333,
+                blue: 0.333,
+                alpha: 1.0,
+            }),
+            "green" => Some(Color {
+                red: 0.333,
+                green: 1.0,
+                blue: 0.333,
+                alpha: 1.0,
+            }),
+            "yellow" => Some(Color {
+                red: 1.0,
+                green: 1.0,
+                blue: 0.333,
+                alpha: 1.0,
+            }),
+            "brown" => Some(Color {
+                red: 0.706,
+                green: 0.408,
+                blue: 0.302,
+                alpha: 1.0,
+            }),
+            "cyan" => Some(Color {
+                red: 0.0,
+                green: 0.667,
+                blue: 0.667,
+                alpha: 1.0,
+            }),
+            "blue" => Some(Color {
+                red: 0.333,
+                green: 0.333,
+                blue: 1.0,
+                alpha: 1.0,
+            }),
+            "orange" => Some(Color {
+                red: 1.0,
+                green: 0.667,
+                blue: 0.0,
+                alpha: 1.0,
+            }),
+            "purple" => Some(Color {
+                red: 1.0,
+                green: 0.333,
+                blue: 1.0,
+                alpha: 1.0,
+            }),
+            "nil" => Some(Color {
+                red: 1.0,
+                green: 1.0,
+                blue: 1.0,
+                alpha: 0.0,
+            }),
+            _ => None,
+        };
+    } else if let Some(Node::Array(color_arr)) = &v.v {
+        if color_arr.len() >= 5
+            && let Some(Node::Number(v1)) = color_arr[0].v
+            && v1 >= 0.0
+            && v1 <= 1.0
+            && let Some(Node::Number(v2)) = color_arr[2].v
+            && v2 >= 0.0
+            && v2 <= 1.0
+            && let Some(Node::Number(v3)) = color_arr[4].v
+            && v3 >= 0.0
+            && v3 <= 1.0
+        {
+            trace!("{} {} {}",v1,v2,v3);
+            if color_arr.len() == 7
+                && let Some(Node::Number(v4)) = color_arr[6].v
+                && v4 >= 0.0
+                && v4 <= 1.0
+            {
+                return Some(Color {
+                    red: v1,
+                    green: v2,
+                    blue: v3,
+                    alpha: v4,
+                });
+            } else {
+                return Some(Color {
+                    red: v1,
+                    green: v2,
+                    blue: v3,
+                    alpha: 1.0,
+                });
+            }
+        }
+    }
+    None
 }
 
 fn from_number_to_completion_item_kind(kind: u64) -> Option<CompletionItemKind> {

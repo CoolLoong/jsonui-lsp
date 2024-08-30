@@ -1,14 +1,14 @@
 use std::{collections::VecDeque, sync::Arc};
 
 use tokio::sync::Mutex;
-use tower_lsp::lsp_types::{DidChangeTextDocumentParams, Position};
+use tower_lsp::lsp_types::{DidChangeTextDocumentParams, Position, Range};
 use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug)]
 pub struct Document {
     pub line_info_cache: Mutex<Vec<LineInfo>>,
     pub content_cache: Mutex<String>,
-    pub content_chars: Mutex<Vec<Arc<str>>>,
+    pub content_chars: Mutex<Vec<Arc<str>>>
 }
 
 #[derive(Debug)]

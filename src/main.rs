@@ -114,8 +114,9 @@ impl LanguageServer for Backend {
         trace!("client lang is {}", json!(client_lang));
         *self.lang.lock().await = Arc::from(client_lang.as_str().unwrap());
 
-        let workspace_folders: std::path::PathBuf = param.root_uri.unwrap().to_file_path().unwrap();
-        self.init_workspace(workspace_folders).await;
+        if let Some(root_url) = param.root_uri && let Ok(workspace) = root_url.to_file_path(){
+            self.init_workspace(workspace).await;
+        }
 
         let file_operation_filters = vec![FileOperationFilter {
             scheme: Some("file".to_string()),
@@ -185,7 +186,7 @@ impl LanguageServer for Backend {
 
         let cmp_v = cmp.get(&hash_value);
         if let Some(vv) = cmp_v {
-            if let Some(result) = vv.compelte_color(&params).await {
+            if let Some(result) = vv.complete_color().await {
                 return Ok(result);
             }
         }
@@ -251,12 +252,12 @@ impl LanguageServer for Backend {
 
     // trigger in file change
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        trace!("did_change");
         let url = &params.text_document.uri;
         let key = hash_uri(url);
         let cmp_map = self.completers.lock().await;
         if let Some(cmp) = cmp_map.get(&key) {
             cmp.update_document(&params).await;
-            cmp.update_ast().await;
         }
     }
 
