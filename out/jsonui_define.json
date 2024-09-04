@@ -65,86 +65,1069 @@
     "notify_on_ellipses",
     "enable_profanity_filter"
   ],
-  "color": {
+  "image": [
+    "texture",
+    "color",
+    "fill",
+    "tiled",
+    "tiled_scale",
+    "uv",
+    "uv_size",
+    "bilinear",
+    "grayscale",
+    "clip_ratio",
+    "clip_direction",
+    "clip_pixelperfect",
+    "keep_ratio",
+    "allow_debug_missing_texture",
+    "force_texture_reload",
+    "zip_folder",
+    "texture_file_system"
+  ],
+  "stack_panel": ["orientation", "collection_name"],
+  "input_panel": ["gesture_tracking_button"],
+  "collection_panel": ["collection_name"],
+  "button": [
+    "default_control",
+    "hover_control",
+    "pressed_control",
+    "locked_control"
+  ],
+  "toggle": [
+    "toggle_name",
+    "radio_toggle_group",
+    "toggle_group_forced_index",
+    "toggle_group_default_selected",
+    "toggle_default_state",
+    "toggle_on_button",
+    "toggle_off_button",
+    "enable_directional_toggling",
+    "toggle_grid_collection_name",
+    "checked_control",
+    "unchecked_control",
+    "checked_hover_control",
+    "unchecked_hover_control",
+    "checked_locked_control",
+    "unchecked_locked_control",
+    "checked_locked_hover_control",
+    "unchecked_locked_hover_control"
+  ],
+  "dropdown": ["dropdown_name", "dropdown_content_control", "dropdown_area"],
+  "slider": [
+    "slider_name",
+    "slider_collection_name",
+    "slider_track_button",
+    "slider_small_increase_button",
+    "slider_small_decrease_button",
+    "slider_selected_button",
+    "slider_deselected_button",
+    "slider_direction",
+    "slider_steps",
+    "slider_speed",
+    "slider_timeout",
+    "slider_inverted",
+    "slider_select_on_hover",
+    "default_control",
+    "hover_control",
+    "slider_box_control",
+    "progress_control",
+    "progress_hover_control",
+    "background_control",
+    "background_hover_control"
+  ],
+  "slider_box": [
+    "default_control",
+    "hover_control",
+    "locked_control",
+    "indent_control"
+  ],
+  "edit_box": [
+    "text_box_name",
+    "text_edit_box_grid_collection_name",
+    "text_type",
+    "max_length",
+    "enabled_newline",
+    "constrain_to_rect",
+    "can_be_deselected",
+    "always_listening",
+    "text_control",
+    "place_holder_control",
+    "virtual_keyboard_buffer_control",
+    "default_control",
+    "hover_control",
+    "pressed_control",
+    "locked_control"
+  ],
+  "grid": [
+    "grid_dimensions",
+    "maximum_grid_items",
+    "grid_dimension_binding",
+    "grid_rescaling_type",
+    "grid_fill_direction",
+    "grid_item_template"
+  ],
+  "scroll_view": [
+    "scrollbar_track_button",
+    "scrollbar_touch_button",
+    "touch_mode",
+    "always_handle_scrolling",
+    "gesture_control_enabled",
+    "jump_to_bottom_on_update",
+    "scroll_speed",
+    "scroll_content",
+    "scroll_view_port",
+    "scrollbar_box",
+    "scrollbar_track",
+    "scroll_box_and_track_panel"
+  ],
+  "selection_wheel": [
+    "button_name",
+    "iterate_left_button_name",
+    "iterate_right_button_name",
+    "slice_count",
+    "initial_button_slice",
+    "inner_radius",
+    "outer_radius",
+    "state_controls"
+  ],
+  "screen": [
+    "is_modal",
+    "vr_mode",
+    "render_only_when_topmost",
+    "screen_not_flushable",
+    "absorbs_input",
+    "close_on_player_hurt",
+    "always_accepts_input",
+    "load_screen_immediately",
+    "cache_screen",
+    "send_telemetry",
+    "render_game_behind",
+    "force_render_below",
+    "is_showing_menu",
+    "low_frequency_rendering",
+    "screen_draws_last",
+    "should_steal_mouse",
+    "gamepad_cursor",
+    "gamepad_cursor_deflection_mode",
+    "should_be_skipped_during_automation"
+  ],
+  "custom": ["renderer"],
+  "toggle_name": {
+    "description": { "zh-cn": "用于区分不同的开关组", "en-us": "toggle_name" },
+    "values": [{ "label": "name", "insert_text": "" }]
+  },
+  "radio_toggle_group": {
+    "description": { "zh-cn": "是否启用开关组", "en-us": "radio_toggle_group" },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "toggle_group_forced_index": {
     "description": {
-      "zh-cn": "文本颜色",
-      "en-us": "text color"
+      "zh-cn": "该控件在开关组中的索引",
+      "en-us": "toggle_group_forced_index"
     },
     "values": [
       {
         "label": "value",
-        "kind": 16
+        "kind": 12,
+        "insert_text_format": 1,
+        "insert_text": "-1"
       }
     ]
   },
-  "text": {
+  "toggle_group_default_selected": {
     "description": {
-      "zh-cn": "文本控件显示的文字",
-      "en-us": "text"
+      "zh-cn": "开关组默认的索引",
+      "en-us": "toggle_group_default_selected"
     },
+    "values": [
+      {
+        "label": "value",
+        "kind": 12,
+        "insert_text_format": 1,
+        "insert_text": "0"
+      }
+    ]
+  },
+  "toggle_default_state": {
+    "description": { "zh-cn": "开关默认状态", "en-us": "toggle_default_state" },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "toggle_on_button": {
+    "description": {
+      "zh-cn": "开关开启的按钮映射事件",
+      "en-us": "toggle_on_button"
+    },
+    "values": [{ "label": "name", "insert_text": "" }]
+  },
+  "toggle_off_button": {
+    "description": {
+      "zh-cn": "开关关闭的按钮映射事件",
+      "en-us": "toggle_off_button"
+    },
+    "values": [{ "label": "name", "insert_text": "" }]
+  },
+  "enable_directional_toggling": {
+    "description": {
+      "zh-cn": "开关是否启用方向切换",
+      "en-us": "enable_directional_toggling"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "toggle_grid_collection_name": {
+    "description": {
+      "zh-cn": "开关组的网格合集名称",
+      "en-us": "toggle_grid_collection_name"
+    },
+    "values": [
+      {
+        "label": "form_buttons",
+        "description": { "zh-cn": "表单按钮集合", "en-us": "form buttons" }
+      },
+      {
+        "label": "custom_form",
+        "description": { "zh-cn": "custom表单集合", "en-us": "custom form" }
+      },
+      {
+        "label": "container_items",
+        "description": { "zh-cn": "容器物品集合", "en-us": "container items" }
+      },
+      {
+        "label": "slots_collection",
+        "description": { "zh-cn": "slots集合", "en-us": "slots collection" }
+      }
+    ]
+  },
+  "checked_control": {
+    "description": {
+      "zh-cn": "开启时的子控件名称",
+      "en-us": "checked_control"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "unchecked_control": {
+    "description": {
+      "zh-cn": "关闭时的子控件名称",
+      "en-us": "unchecked_control"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "checked_hover_control": {
+    "description": {
+      "zh-cn": "开启并悬停时的子控件名称",
+      "en-us": "checked_hover_control"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "unchecked_hover_control": {
+    "description": {
+      "zh-cn": "关闭并悬停时的子控件名称",
+      "en-us": "unchecked_hover_control"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "checked_locked_control": {
+    "description": {
+      "zh-cn": "锁定状态，开启时的子控件名称",
+      "en-us": "checked_locked_control"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "unchecked_locked_control": {
+    "description": {
+      "zh-cn": "锁定状态，关闭时的子控件名称",
+      "en-us": "unchecked_locked_control"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "checked_locked_hover_control": {
+    "description": {
+      "zh-cn": "锁定状态，开启并悬停时的子控件名称",
+      "en-us": "checked_locked_hover_control"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "unchecked_locked_hover_control": {
+    "description": {
+      "zh-cn": "锁定状态，关闭并悬停时的子控件名称",
+      "en-us": "unchecked_locked_hover_control"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "dropdown_name": {
+    "description": { "zh-cn": "下拉菜单的名称", "en-us": "dropdown_name" },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "dropdown_content_control": {
+    "description": {
+      "zh-cn": "下拉菜单内容控件",
+      "en-us": "dropdown_content_control"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "dropdown_area": {
+    "description": { "zh-cn": "下拉菜单内部控件", "en-us": "dropdown area" },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "slider_name": {
+    "description": { "zh-cn": "滑块的名称", "en-us": "name" },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "slider_collection_name": {
+    "description": { "zh-cn": "滑块的合集名", "en-us": "滑块的合集名" },
+    "values": [
+      {
+        "label": "form_buttons",
+        "description": { "zh-cn": "表单按钮集合", "en-us": "form buttons" }
+      },
+      {
+        "label": "custom_form",
+        "description": { "zh-cn": "custom表单集合", "en-us": "custom form" }
+      },
+      {
+        "label": "container_items",
+        "description": { "zh-cn": "容器物品集合", "en-us": "container items" }
+      },
+      {
+        "label": "slots_collection",
+        "description": { "zh-cn": "slots集合", "en-us": "slots collection" }
+      }
+    ]
+  },
+  "slider_track_button": {
+    "description": {
+      "zh-cn": "滑块跟踪的按钮映射ID",
+      "en-us": "slider_track_button"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "slider_small_increase_button": {
+    "description": {
+      "zh-cn": "滑块稍微增加的按钮映射ID",
+      "en-us": "slider_small_increase_button"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "slider_small_decrease_button": {
+    "description": {
+      "zh-cn": "滑块稍微减少的按钮映射ID",
+      "en-us": "slider_small_decrease_button"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "slider_selected_button": {
+    "description": {
+      "zh-cn": "滑块选中的按钮映射ID",
+      "en-us": "slider_selected_button"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "slider_deselected_button": {
+    "description": {
+      "zh-cn": "滑块未选中的按钮映射ID",
+      "en-us": "slider_deselected_button"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "slider_direction": {
+    "description": { "zh-cn": "滑块的方向", "en-us": "slider_direction" },
+    "values": [{ "label": "horizontal" }, { "label": "vertical" }]
+  },
+  "slider_steps": {
+    "description": { "zh-cn": "滑块的步数", "en-us": "slider_steps" },
+    "values": [
+      {
+        "label": "value",
+        "kind": 12,
+        "insert_text_format": 1,
+        "insert_text": "1"
+      }
+    ]
+  },
+  "slider_speed": {
+    "description": { "zh-cn": "滑块的速度", "en-us": "slider_speed" },
+    "values": [
+      {
+        "label": "value",
+        "kind": 12,
+        "insert_text_format": 1,
+        "insert_text": "1.0"
+      }
+    ]
+  },
+  "slider_timeout": {
+    "description": { "zh-cn": "滑块的超时时间", "en-us": "slider_timeout" },
+    "values": [
+      {
+        "label": "value",
+        "kind": 12,
+        "insert_text_format": 1,
+        "insert_text": "1.0"
+      }
+    ]
+  },
+  "slider_inverted": {
+    "description": { "zh-cn": "滑块是否逆转", "en-us": "slider_inverted" },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "slider_select_on_hover": {
+    "description": {
+      "zh-cn": "滑块是否在悬停时选中",
+      "en-us": "slider_select_on_hover"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "slider_box_control": {
+    "description": { "zh-cn": "滑块框控件", "en-us": "slider_box_control" },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "progress_control": {
+    "description": {
+      "zh-cn": "默认状态滑块进度控件",
+      "en-us": "progress_control"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "progress_hover_control": {
+    "description": {
+      "zh-cn": "悬停状态滑块进度控件",
+      "en-us": "progress_hover_control"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "background_control": {
+    "description": {
+      "zh-cn": "默认状态滑块背景控件",
+      "en-us": "background_control"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "background_hover_control": {
+    "description": {
+      "zh-cn": "悬停滑块背景控件",
+      "en-us": "background_hover_control"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "indent_control": {
+    "description": { "zh-cn": "缩进子控件", "en-us": "indent_control" },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "text_box_name": {
+    "description": { "zh-cn": "输入框名称", "en-us": "输入框名称" },
+    "values": [{ "label": "name", "insert_text": "" }]
+  },
+  "text_edit_box_grid_collection_name": {
+    "description": { "zh-cn": "输入框的合集名", "en-us": "输入框的合集名" },
+    "values": [
+      {
+        "label": "form_buttons",
+        "description": { "zh-cn": "表单按钮集合", "en-us": "form buttons" }
+      },
+      {
+        "label": "custom_form",
+        "description": { "zh-cn": "custom表单集合", "en-us": "custom form" }
+      },
+      {
+        "label": "container_items",
+        "description": { "zh-cn": "容器物品集合", "en-us": "container items" }
+      },
+      {
+        "label": "slots_collection",
+        "description": { "zh-cn": "slots集合", "en-us": "slots collection" }
+      }
+    ]
+  },
+  "text_type": {
+    "description": { "zh-cn": "输入框的文本类型", "en-us": "text_type" },
+    "values": [
+      {
+        "label": "ExtendedASCII",
+        "description": { "zh-cn": "ASCLL扩展", "en-us": "ExtendedASCII" }
+      },
+      {
+        "label": "IdentifierChars",
+        "description": { "zh-cn": "标识符字符", "en-us": "IdentifierChars" }
+      },
+      {
+        "label": "NumberChars",
+        "description": { "zh-cn": "数字字符", "en-us": "NumberChars" }
+      }
+    ]
+  },
+  "max_length": {
+    "description": {
+      "zh-cn": "输入字符的最大长度",
+      "en-us": "input max length"
+    },
+    "values": [
+      {
+        "label": "value",
+        "kind": 12,
+        "insert_text_format": 1,
+        "insert_text": "10"
+      }
+    ]
+  },
+  "enabled_newline": {
+    "description": {
+      "zh-cn": "是否允许输入框换行",
+      "en-us": "enabled_newline"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "constrain_to_rect": {
+    "description": {
+      "zh-cn": "输入框是否限制矩形区域",
+      "en-us": "constrain_to_rect"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "can_be_deselected": {
+    "description": {
+      "zh-cn": "输入框是否可以取消输入",
+      "en-us": "can_be_deselected"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "always_listening": {
+    "description": {
+      "zh-cn": "输入框是否始终监听输入",
+      "en-us": "always_listening"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "text_control": {
+    "description": { "zh-cn": "输入框中的文本控件", "en-us": "text_control" },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "place_holder_control": {
+    "description": {
+      "zh-cn": "输入框中的占位符控件",
+      "en-us": "place_holder_control"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "virtual_keyboard_buffer_control": {
+    "description": {
+      "zh-cn": "输入框中的虚拟键盘缓冲控件",
+      "en-us": "virtual_keyboard_buffer_control"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "grid_dimensions": {
+    "description": { "zh-cn": "网格的行列数", "en-us": "dimensions" },
     "values": [
       {
         "label": "value",
         "kind": 15,
         "insert_text_format": 2,
-        "insert_text": "\"$0\""
+        "insert_text": "[\"$1\", \"$0\"]"
       }
     ]
   },
-  "font_type": {
+  "maximum_grid_items": {
     "description": {
-      "zh-cn": "字体类型",
-      "en-us": "font type"
+      "zh-cn": "限制网格最大物品数量",
+      "en-us": "maximum grid items"
     },
     "values": [
       {
-        "label": "default",
-        "description": {
-          "zh-cn": "默认",
-          "en-us": "default"
-        }
-      },
-      {
-        "label": "rune",
-        "description": {
-          "zh-cn": "银河字体",
-          "en-us": "rune"
-        }
-      },
-      {
-        "label": "MinecraftTen",
-        "description": {
-          "zh-cn": "MinecraftTen",
-          "en-us": "MinecraftTen"
-        }
-      },
-      {
-        "label": "unicode",
-        "description": {
-          "zh-cn": "unicode",
-          "en-us": "unicode"
-        }
-      },
-      {
-        "label": "smooth",
-        "description": {
-          "zh-cn": "平滑字体",
-          "en-us": "smooth"
-        }
-      },
-      {
-        "label": "OldSmoothFont",
-        "description": {
-          "zh-cn": "旧版平滑字体",
-          "en-us": "OldSmoothFont"
-        }
+        "label": "value",
+        "kind": 12,
+        "insert_text_format": 1,
+        "insert_text": "5"
       }
     ]
   },
-  "font_scale_factor": {
+  "grid_dimension_binding": {
     "description": {
-      "zh-cn": "字体缩放大小",
-      "en-us": "scale factor"
+      "zh-cn": "网格尺寸的绑定",
+      "en-us": "grid_dimension_binding"
+    },
+    "values": [{ "label": "binding name", "insert_text": "" }]
+  },
+  "grid_rescaling_type": {
+    "description": {
+      "zh-cn": "网格重新缩放类型",
+      "en-us": "grid rescaling type"
+    },
+    "values": [
+      {
+        "label": "horizontal",
+        "description": { "zh-cn": "horizontal", "en-us": "horizontal" }
+      },
+      {
+        "label": "vertical",
+        "description": { "zh-cn": "vertical", "en-us": "vertical" }
+      },
+      { "label": "none", "description": { "zh-cn": "none", "en-us": "none" } }
+    ]
+  },
+  "grid_fill_direction": {
+    "description": { "zh-cn": "网格填充方向", "en-us": "grid fill direction" },
+    "values": [
+      {
+        "label": "horizontal",
+        "description": { "zh-cn": "horizontal", "en-us": "horizontal" }
+      },
+      {
+        "label": "vertical",
+        "description": { "zh-cn": "vertical", "en-us": "vertical" }
+      },
+      { "label": "none", "description": { "zh-cn": "none", "en-us": "none" } }
+    ]
+  },
+  "grid_item_template": {
+    "description": { "zh-cn": "网格物品模板", "en-us": "grid item template" },
+    "values": [{ "label": "grid template", "insert_text": "" }]
+  },
+  "scrollbar_track_button": {
+    "description": {
+      "zh-cn": "滚动条轨道的按钮 ID",
+      "en-us": "scrollbar_track_button"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "scrollbar_touch_button": {
+    "description": {
+      "zh-cn": "滚动条触屏的按钮 ID",
+      "en-us": "scrollbar_touch_button"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "touch_mode": {
+    "description": { "zh-cn": "是否使用触屏模式", "en-us": "touch_mode" },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "always_handle_scrolling": {
+    "description": {
+      "zh-cn": "是否始终处理滚动事件",
+      "en-us": "always_handle_scrolling"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "gesture_control_enabled": {
+    "description": {
+      "zh-cn": "是否启用手势控制",
+      "en-us": "gesture_control_enabled"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "jump_to_bottom_on_update": {
+    "description": {
+      "zh-cn": "更新时回到顶部",
+      "en-us": "jump_to_bottom_on_update"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "scroll_speed": {
+    "description": { "zh-cn": "滚动速度", "en-us": "滚动速度" },
+    "values": [
+      {
+        "label": "value",
+        "kind": 12,
+        "insert_text_format": 1,
+        "insert_text": "1.0"
+      }
+    ]
+  },
+  "scroll_content": {
+    "description": { "zh-cn": "滚动面板的内容控件", "en-us": "scroll_content" },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "scroll_view_port": {
+    "description": {
+      "zh-cn": "滚动面板的视图控件",
+      "en-us": "scroll_view_port"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "scrollbar_box": {
+    "description": {
+      "zh-cn": "滚动面板的滚动条控件",
+      "en-us": "scrollbar_box"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "scrollbar_track": {
+    "description": {
+      "zh-cn": "滚动面板的滚动轨道控件",
+      "en-us": "scrollbar_track"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "scroll_box_and_track_panel": {
+    "description": {
+      "zh-cn": "滚动面板的滚动条和滚动轨道控件",
+      "en-us": "scroll_box_and_track_panel"
+    },
+    "values": [{ "label": "control reference name", "insert_text": "" }]
+  },
+  "button_name": {
+    "description": { "zh-cn": "按钮映射 ID", "en-us": "button name" },
+    "values": [{ "label": "button id", "insert_text": "" }]
+  },
+  "iterate_left_button_name": {
+    "description": {
+      "zh-cn": "向左迭代按钮映射 ID",
+      "en-us": "left button name"
+    },
+    "values": [{ "label": "button id", "insert_text": "" }]
+  },
+  "iterate_right_button_name": {
+    "description": {
+      "zh-cn": "向右迭代按钮映射 ID",
+      "en-us": "right button name"
+    },
+    "values": [{ "label": "button id", "insert_text": "" }]
+  },
+  "slice_count": {
+    "description": { "zh-cn": "按钮切片数量", "en-us": "slice count" },
+    "values": [
+      {
+        "label": "value",
+        "kind": 12,
+        "insert_text_format": 1,
+        "insert_text": "0"
+      }
+    ]
+  },
+  "initial_button_slice": {
+    "description": { "zh-cn": "初始按钮数量", "en-us": "inital button slice" },
+    "values": [
+      {
+        "label": "value",
+        "kind": 12,
+        "insert_text_format": 1,
+        "insert_text": "0"
+      }
+    ]
+  },
+  "inner_radius": {
+    "description": { "zh-cn": "内部半径", "en-us": "inner radius" },
+    "values": [
+      {
+        "label": "value",
+        "kind": 12,
+        "insert_text_format": 1,
+        "insert_text": "1.0"
+      }
+    ]
+  },
+  "outer_radius": {
+    "description": { "zh-cn": "外部半径", "en-us": "outer radius" },
+    "values": [
+      {
+        "label": "value",
+        "kind": 12,
+        "insert_text_format": 1,
+        "insert_text": "1.0"
+      }
+    ]
+  },
+  "state_controls": {
+    "description": { "zh-cn": "状态控件数组", "en-us": "state controls" },
+    "values": [
+      {
+        "label": "value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "[\n\t{\n\t\t\"$1\": \"$0\"\n\t}\n]"
+      }
+    ]
+  },
+  "is_modal": {
+    "description": { "zh-cn": "是否是模态屏幕", "en-us": "enable modal" },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "vr_mode": {
+    "description": { "zh-cn": "VR模式", "en-us": "vr mode" },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "render_only_when_topmost": {
+    "description": {
+      "zh-cn": "屏幕是否在屏幕栈最顶部时渲染",
+      "en-us": "render only when topmost"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "screen_not_flushable": {
+    "description": {
+      "zh-cn": "屏幕是否不可清除",
+      "en-us": "screen not flushable"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "absorbs_input": {
+    "description": { "zh-cn": "屏幕是否吸收输入", "en-us": "absorbs input" },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "close_on_player_hurt": {
+    "description": {
+      "zh-cn": "是否在玩家受伤后关闭",
+      "en-us": "close on player hurt"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "always_accepts_input": {
+    "description": {
+      "zh-cn": "是否在始终接受输入",
+      "en-us": "always accepts input"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "load_screen_immediately": {
+    "description": {
+      "zh-cn": "立即加载该屏幕",
+      "en-us": "load screen immediately"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "cache_screen": {
+    "description": {
+      "zh-cn": "是否缓存屏幕内数据",
+      "en-us": "whether cache data in the screen"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "send_telemetry": {
+    "description": {
+      "zh-cn": "该屏幕是否发送遥测数据",
+      "en-us": "send telemetry"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "render_game_behind": {
+    "description": {
+      "zh-cn": "该屏幕在渲染后，是否渲染后方的游戏",
+      "en-us": "render game behind"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "force_render_below": {
+    "description": {
+      "zh-cn": "该屏幕是否强制渲染屏幕栈后方屏幕",
+      "en-us": "force render below"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "is_showing_menu": {
+    "description": {
+      "zh-cn": "该屏幕在渲染后，是否停止 HUD 的渲染",
+      "en-us": "Whether the screen stops rendering HUD after rendering"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "low_frequency_rendering": {
+    "description": {
+      "zh-cn": "该屏幕是否低频渲染",
+      "en-us": "Whether low-frequency rendering"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "screen_draws_last": {
+    "description": {
+      "zh-cn": "该屏幕是否最后绘制",
+      "en-us": "Whether to draw last"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "should_steal_mouse": {
+    "description": {
+      "zh-cn": "该屏幕是否隐藏鼠标指针",
+      "en-us": "Whether show the steal mouse"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "gamepad_cursor": {
+    "description": {
+      "zh-cn": "该屏幕是否隐藏手柄指针",
+      "en-us": "Whether show the gamepad pointer"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "gamepad_cursor_deflection_mode": {
+    "description": {
+      "zh-cn": "手柄指针是否启用偏转模式",
+      "en-us": "Whether the gamepad cursor has deflection mode enabled"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "should_be_skipped_during_automation": {
+    "description": {
+      "zh-cn": "屏幕是否在自动化过程中跳过",
+      "en-us": "Whether the screen is skipped during the automation process"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "renderer": {
+    "description": { "zh-cn": "该自定义控件的渲染器", "en-us": "renderer" },
+    "values": [{ "label": "value", "insert_text": "" }]
+  },
+  "default_control": {
+    "description": {
+      "zh-cn": "默认状态的控件引用名称",
+      "en-us": "Control reference name for the default state"
+    },
+    "values": [{ "label": "value", "insert_text": "" }]
+  },
+  "hover_control": {
+    "description": {
+      "zh-cn": "悬停状态的控件引用名称",
+      "en-us": "Control reference name for the hover state"
+    },
+    "values": [{ "label": "value", "insert_text": "" }]
+  },
+  "pressed_control": {
+    "description": {
+      "zh-cn": "按压状态的控件引用名称",
+      "en-us": "Control reference name for the pressed state"
+    },
+    "values": [{ "label": "value", "insert_text": "" }]
+  },
+  "locked_control": {
+    "description": {
+      "zh-cn": "锁定状态的控件引用名称",
+      "en-us": "Control reference name for the locked state"
+    },
+    "values": [{ "label": "value", "insert_text": "" }]
+  },
+  "gesture_tracking_button": {
+    "description": {
+      "zh-cn": "追踪手势的按钮映射ID",
+      "en-us": "A Button mapping ID"
+    },
+    "values": [{ "label": "id", "insert_text": "" }]
+  },
+  "orientation": {
+    "description": {
+      "zh-cn": "子控件的堆叠方向",
+      "en-us": "Direction of sub control"
+    },
+    "values": [
+      {
+        "label": "vertical",
+        "description": { "zh-cn": "垂直", "en-us": "vertical" }
+      },
+      {
+        "label": "horizontal",
+        "description": { "zh-cn": "水平", "en-us": "horizontal" }
+      }
+    ]
+  },
+  "clip_direction": {
+    "description": { "zh-cn": "剪辑方向", "en-us": "Image clipping direction" },
+    "values": [
+      { "label": "left", "description": { "zh-cn": "左", "en-us": "left" } },
+      {
+        "label": "center",
+        "description": { "zh-cn": "中", "en-us": "center" }
+      },
+      { "label": "right", "description": { "zh-cn": "右", "en-us": "right" } },
+      { "label": "up", "description": { "zh-cn": "上", "en-us": "up" } },
+      { "label": "down", "description": { "zh-cn": "下", "en-us": "down" } }
+    ]
+  },
+  "clip_ratio": {
+    "description": {
+      "zh-cn": "图片的剪辑比例",
+      "en-us": "Image clipping ratio"
     },
     "values": [
       {
@@ -155,39 +1138,391 @@
       }
     ]
   },
-  "font_size": {
+  "uv": {
+    "description": { "zh-cn": "图片映射的初始位置", "en-us": "uv offset" },
+    "values": [
+      {
+        "label": "value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "[\"$1\", \"$0\"]"
+      }
+    ]
+  },
+  "uv_size": {
+    "description": { "zh-cn": "图片映射的大小", "en-us": "uv size" },
+    "values": [
+      {
+        "label": "value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "[\"$1\", \"$0\"]"
+      }
+    ]
+  },
+  "tiled_scale": {
+    "description": { "zh-cn": "平铺的缩放大小", "en-us": "Tiling scale size" },
+    "values": [
+      {
+        "label": "value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "[\"$1\", \"$0\"]"
+      }
+    ]
+  },
+  "tiled": {
     "description": {
-      "zh-cn": "字体大小",
-      "en-us": "font size"
+      "zh-cn": "定义是否平铺或者图片平铺的方向",
+      "en-us": "Define whether to tile the image or the direction of tiling"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 },
+      { "label": "x" },
+      { "label": "y" },
+      { "label": "xy" },
+      { "label": "yx" }
+    ]
+  },
+  "clip_pixelperfect": {
+    "description": {
+      "zh-cn": "图片剪辑是否精准到像素",
+      "en-us": "Clipping be precise to the pixel"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "fill": {
+    "description": {
+      "zh-cn": "图片是否填满至控件大小",
+      "en-us": "Fill the control size"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "texture": {
+    "description": { "zh-cn": "图片所在的路径", "en-us": "Path to the image" },
+    "values": [{ "label": "path", "insert_text": "" }]
+  },
+  "notify_on_ellipses": {
+    "description": {
+      "zh-cn": "遇到省略号时通知的文本",
+      "en-us": "Notify when encountering an ellipsis"
     },
     "values": [
       {
-        "label": "small",
-        "description": {
-          "zh-cn": "小",
-          "en-us": "small"
-        }
+        "label": "value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "[\"$0\"]"
+      }
+    ]
+  },
+  "text_alignment": {
+    "description": { "zh-cn": "文本的对齐方式", "en-us": "Text alignment" },
+    "values": [
+      {
+        "label": "left",
+        "description": { "zh-cn": "文本居左", "en-us": "left" }
       },
+      {
+        "label": "center",
+        "description": { "zh-cn": "文本居中", "en-us": "center" }
+      },
+      {
+        "label": "right",
+        "description": { "zh-cn": "文本居右", "en-us": "right" }
+      }
+    ]
+  },
+  "line_padding": {
+    "description": {
+      "zh-cn": "改变文本每行之间的间距",
+      "en-us": "Change the spacing between lines of text"
+    },
+    "values": [{ "label": "0.0", "kind": 12, "insert_text_format": 1 }]
+  },
+  "keep_ratio": {
+    "description": {
+      "zh-cn": "图片是否保持比例",
+      "en-us": "Keep aspect ratio"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "grayscale": {
+    "description": {
+      "zh-cn": "图片是否使用灰白滤镜显示",
+      "en-us": "Displayed with grayscale"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "bilinear": {
+    "description": {
+      "zh-cn": "开启双线性模式",
+      "en-us": "Enable bilinear mode"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "hide_hyphen": {
+    "description": {
+      "zh-cn": "是否隐藏文本中的“-”字符",
+      "en-us": "Hide the '-' character in the text"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "enable_profanity_filter": {
+    "description": {
+      "zh-cn": "是否启用敏感词过滤器",
+      "en-us": "Enable word filter"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "shadow": {
+    "description": {
+      "zh-cn": "是否显示文本阴影",
+      "en-us": "Display text shadow"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "localize": {
+    "description": {
+      "zh-cn": "文本是否支持本地化",
+      "en-us": "whether the text support localization"
+    },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  },
+  "color": {
+    "description": { "zh-cn": "文本颜色", "en-us": "text color" },
+    "values": [
+      {
+        "label": "rgb arr",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "[$1, $2, $0]"
+      },
+      {
+        "label": "white",
+        "description": { "zh-cn": "white", "en-us": "white" }
+      },
+      {
+        "label": "silver",
+        "description": { "zh-cn": "silver", "en-us": "silver" }
+      },
+      {
+        "label": "black",
+        "description": { "zh-cn": "black", "en-us": "black" }
+      },
+      { "label": "red", "description": { "zh-cn": "red", "en-us": "red" } },
+      {
+        "label": "green",
+        "description": { "zh-cn": "green", "en-us": "green" }
+      },
+      {
+        "label": "yellow",
+        "description": { "zh-cn": "yellow", "en-us": "yellow" }
+      },
+      {
+        "label": "brown",
+        "description": { "zh-cn": "brown", "en-us": "brown" }
+      },
+      { "label": "cyan", "description": { "zh-cn": "cyan", "en-us": "cyan" } },
+      { "label": "blue", "description": { "zh-cn": "blue", "en-us": "blue" } },
+      {
+        "label": "orange",
+        "description": { "zh-cn": "orange", "en-us": "orange" }
+      },
+      {
+        "label": "purple",
+        "description": { "zh-cn": "purple", "en-us": "purple" }
+      },
+      {
+        "label": "gray grey",
+        "description": { "zh-cn": "gray grey", "en-us": "gray grey" }
+      },
+      { "label": "nil", "description": { "zh-cn": "nil", "en-us": "nil" } },
+      {
+        "label": "rgba arr",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "[$1, $2, $3, $0]"
+      }
+    ]
+  },
+  "locked_color": {
+    "description": { "zh-cn": "文本颜色", "en-us": "text color" },
+    "values": [
+      {
+        "label": "rgb arr",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "[$1, $2, $0]"
+      },
+      {
+        "label": "white",
+        "description": { "zh-cn": "white", "en-us": "white" }
+      },
+      {
+        "label": "silver",
+        "description": { "zh-cn": "silver", "en-us": "silver" }
+      },
+      {
+        "label": "black",
+        "description": { "zh-cn": "black", "en-us": "black" }
+      },
+      { "label": "red", "description": { "zh-cn": "red", "en-us": "red" } },
+      {
+        "label": "green",
+        "description": { "zh-cn": "green", "en-us": "green" }
+      },
+      {
+        "label": "yellow",
+        "description": { "zh-cn": "yellow", "en-us": "yellow" }
+      },
+      {
+        "label": "brown",
+        "description": { "zh-cn": "brown", "en-us": "brown" }
+      },
+      { "label": "cyan", "description": { "zh-cn": "cyan", "en-us": "cyan" } },
+      { "label": "blue", "description": { "zh-cn": "blue", "en-us": "blue" } },
+      {
+        "label": "orange",
+        "description": { "zh-cn": "orange", "en-us": "orange" }
+      },
+      {
+        "label": "purple",
+        "description": { "zh-cn": "purple", "en-us": "purple" }
+      },
+      {
+        "label": "gray grey",
+        "description": { "zh-cn": "gray grey", "en-us": "gray grey" }
+      },
+      { "label": "nil", "description": { "zh-cn": "nil", "en-us": "nil" } },
+      {
+        "label": "rgba arr",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "[$1, $2, $3, $0]"
+      }
+    ]
+  },
+  "text": {
+    "description": { "zh-cn": "文本控件显示的文字", "en-us": "text" },
+    "values": [
+      {
+        "label": "value",
+        "kind": 15,
+        "insert_text_format": 2,
+        "insert_text": "\"$0\""
+      }
+    ]
+  },
+  "font_type": {
+    "description": { "zh-cn": "字体类型", "en-us": "font type" },
+    "values": [
+      {
+        "label": "default",
+        "description": { "zh-cn": "默认", "en-us": "default" }
+      },
+      {
+        "label": "rune",
+        "description": { "zh-cn": "银河字体", "en-us": "rune" }
+      },
+      {
+        "label": "MinecraftTen",
+        "description": { "zh-cn": "MinecraftTen", "en-us": "MinecraftTen" }
+      },
+      {
+        "label": "unicode",
+        "description": { "zh-cn": "unicode", "en-us": "unicode" }
+      },
+      {
+        "label": "smooth",
+        "description": { "zh-cn": "平滑字体", "en-us": "smooth" }
+      },
+      {
+        "label": "OldSmoothFont",
+        "description": { "zh-cn": "旧版平滑字体", "en-us": "OldSmoothFont" }
+      }
+    ]
+  },
+  "backup_font_type": {
+    "description": { "zh-cn": "字体类型", "en-us": "font type" },
+    "values": [
+      {
+        "label": "default",
+        "description": { "zh-cn": "默认", "en-us": "default" }
+      },
+      {
+        "label": "rune",
+        "description": { "zh-cn": "银河字体", "en-us": "rune" }
+      },
+      {
+        "label": "MinecraftTen",
+        "description": { "zh-cn": "MinecraftTen", "en-us": "MinecraftTen" }
+      },
+      {
+        "label": "unicode",
+        "description": { "zh-cn": "unicode", "en-us": "unicode" }
+      },
+      {
+        "label": "smooth",
+        "description": { "zh-cn": "平滑字体", "en-us": "smooth" }
+      },
+      {
+        "label": "OldSmoothFont",
+        "description": { "zh-cn": "旧版平滑字体", "en-us": "OldSmoothFont" }
+      }
+    ]
+  },
+  "font_scale_factor": {
+    "description": { "zh-cn": "字体缩放大小", "en-us": "scale factor" },
+    "values": [
+      {
+        "label": "value",
+        "kind": 12,
+        "insert_text_format": 1,
+        "insert_text": "1.0"
+      }
+    ]
+  },
+  "font_size": {
+    "description": { "zh-cn": "字体大小", "en-us": "font size" },
+    "values": [
+      { "label": "small", "description": { "zh-cn": "小", "en-us": "small" } },
       {
         "label": "normal",
-        "description": {
-          "zh-cn": "正常",
-          "en-us": "normal"
-        }
+        "description": { "zh-cn": "正常", "en-us": "normal" }
       },
-      {
-        "label": "large",
-        "description": {
-          "zh-cn": "大",
-          "en-us": "large"
-        }
-      },
+      { "label": "large", "description": { "zh-cn": "大", "en-us": "large" } },
       {
         "label": "extra_large",
-        "description": {
-          "zh-cn": "特大",
-          "en-us": "extra_large"
-        }
+        "description": { "zh-cn": "特大", "en-us": "extra_large" }
       }
     ]
   },
@@ -197,23 +1532,12 @@
       "en-us": "whether resolve sibling scopes"
     },
     "values": [
-      {
-        "label": "true",
-        "kind": 12,
-        "insert_text_format": 1
-      },
-      {
-        "label": "false",
-        "kind": 12,
-        "insert_text_format": 1
-      }
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
     ]
   },
   "source_control_name": {
-    "description": {
-      "zh-cn": "被读取的指定控件名称",
-      "en-us": "control name"
-    },
+    "description": { "zh-cn": "被读取的指定控件名称", "en-us": "control name" },
     "values": [
       {
         "label": "value",
@@ -224,10 +1548,7 @@
     ]
   },
   "source_property_name": {
-    "description": {
-      "zh-cn": "引用的绑定",
-      "en-us": "source property"
-    },
+    "description": { "zh-cn": "引用的绑定", "en-us": "source property" },
     "values": [
       {
         "label": "value",
@@ -238,10 +1559,7 @@
     ]
   },
   "target_property_name": {
-    "description": {
-      "zh-cn": "覆盖的绑定",
-      "en-us": "target property"
-    },
+    "description": { "zh-cn": "覆盖的绑定", "en-us": "target property" },
     "values": [
       {
         "label": "value",
@@ -252,10 +1570,7 @@
     ]
   },
   "binding_name": {
-    "description": {
-      "zh-cn": "绑定名称",
-      "en-us": "bingding name"
-    },
+    "description": { "zh-cn": "绑定名称", "en-us": "bingding name" },
     "values": [
       {
         "label": "value",
@@ -266,10 +1581,7 @@
     ]
   },
   "binding_name_override": {
-    "description": {
-      "zh-cn": "覆盖的绑定",
-      "en-us": "bingding name"
-    },
+    "description": { "zh-cn": "覆盖的绑定", "en-us": "bingding name" },
     "values": [
       {
         "label": "value",
@@ -293,6 +1605,27 @@
       }
     ]
   },
+  "collection_name": {
+    "description": { "zh-cn": "集合名称", "en-us": "collection name" },
+    "values": [
+      {
+        "label": "form_buttons",
+        "description": { "zh-cn": "表单按钮集合", "en-us": "form buttons" }
+      },
+      {
+        "label": "custom_form",
+        "description": { "zh-cn": "custom表单集合", "en-us": "custom form" }
+      },
+      {
+        "label": "container_items",
+        "description": { "zh-cn": "容器物品集合", "en-us": "container items" }
+      },
+      {
+        "label": "slots_collection",
+        "description": { "zh-cn": "slots集合", "en-us": "slots collection" }
+      }
+    ]
+  },
   "binding_collection_name": {
     "description": {
       "zh-cn": "绑定合集名",
@@ -301,60 +1634,33 @@
     "values": [
       {
         "label": "form_buttons",
-        "description": {
-          "zh-cn": "表单按钮集合",
-          "en-us": "form buttons"
-        }
+        "description": { "zh-cn": "表单按钮集合", "en-us": "form buttons" }
       },
       {
         "label": "container_items",
-        "description": {
-          "zh-cn": "容器物品集合",
-          "en-us": "container items"
-        }
+        "description": { "zh-cn": "容器物品集合", "en-us": "container items" }
       },
       {
         "label": "slots_collection",
-        "description": {
-          "zh-cn": "slots集合",
-          "en-us": "slots collection"
-        }
+        "description": { "zh-cn": "slots集合", "en-us": "slots collection" }
       }
     ]
   },
   "binding_condition": {
-    "description": {
-      "zh-cn": "绑定条件",
-      "en-us": "binding condition"
-    },
+    "description": { "zh-cn": "绑定条件", "en-us": "binding condition" },
     "values": [
-      {
-        "label": "none",
-        "description": {
-          "zh-cn": "none",
-          "en-us": "none"
-        }
-      },
+      { "label": "none", "description": { "zh-cn": "none", "en-us": "none" } },
       {
         "label": "once",
-        "description": {
-          "zh-cn": "仅一次",
-          "en-us": "once"
-        }
+        "description": { "zh-cn": "仅一次", "en-us": "once" }
       },
       {
         "label": "always",
-        "description": {
-          "zh-cn": "总是",
-          "en-us": "always"
-        }
+        "description": { "zh-cn": "总是", "en-us": "always" }
       },
       {
         "label": "visible",
-        "description": {
-          "zh-cn": "可见时",
-          "en-us": "visible"
-        }
+        "description": { "zh-cn": "可见时", "en-us": "visible" }
       },
       {
         "label": "always_when_visible",
@@ -378,19 +1684,10 @@
       "en-us": "define the binding type"
     },
     "values": [
-      {
-        "label": "view",
-        "description": {
-          "zh-cn": "view",
-          "en-us": "view"
-        }
-      },
+      { "label": "view", "description": { "zh-cn": "view", "en-us": "view" } },
       {
         "label": "collection",
-        "description": {
-          "zh-cn": "collection",
-          "en-us": "collection"
-        }
+        "description": { "zh-cn": "collection", "en-us": "collection" }
       },
       {
         "label": "collection_details",
@@ -401,25 +1698,13 @@
       },
       {
         "label": "global",
-        "description": {
-          "zh-cn": "global",
-          "en-us": "global"
-        }
+        "description": { "zh-cn": "global", "en-us": "global" }
       },
-      {
-        "label": "none",
-        "description": {
-          "zh-cn": "none",
-          "en-us": "none"
-        }
-      }
+      { "label": "none", "description": { "zh-cn": "none", "en-us": "none" } }
     ]
   },
   "size": {
-    "description": {
-      "zh-cn": "控件大小",
-      "en-us": "control size"
-    },
+    "description": { "zh-cn": "控件大小", "en-us": "control size" },
     "values": [
       {
         "label": "str value",
@@ -436,10 +1721,7 @@
     ]
   },
   "offset": {
-    "description": {
-      "zh-cn": "控件偏移量",
-      "en-us": "control offset"
-    },
+    "description": { "zh-cn": "控件偏移量", "en-us": "control offset" },
     "values": [
       {
         "label": "str value",
@@ -456,10 +1738,7 @@
     ]
   },
   "min_size": {
-    "description": {
-      "zh-cn": "最小大小",
-      "en-us": "min size"
-    },
+    "description": { "zh-cn": "最小大小", "en-us": "min size" },
     "values": [
       {
         "label": "str value",
@@ -476,10 +1755,7 @@
     ]
   },
   "max_size": {
-    "description": {
-      "zh-cn": "最大大小",
-      "en-us": "max size"
-    },
+    "description": { "zh-cn": "最大大小", "en-us": "max size" },
     "values": [
       {
         "label": "str value",
@@ -496,152 +1772,89 @@
     ]
   },
   "anchor_from": {
-    "description": {
-      "zh-cn": "父锚点",
-      "en-us": "anchor from"
-    },
+    "description": { "zh-cn": "父锚点", "en-us": "anchor from" },
     "values": [
       {
         "label": "top_left",
-        "description": {
-          "zh-cn": "左上角",
-          "en-us": "top left"
-        }
+        "description": { "zh-cn": "左上角", "en-us": "top left" }
       },
       {
         "label": "top_middle",
-        "description": {
-          "zh-cn": "正上方",
-          "en-us": "top middle"
-        }
+        "description": { "zh-cn": "正上方", "en-us": "top middle" }
       },
       {
         "label": "top_right",
-        "description": {
-          "zh-cn": "右上角",
-          "en-us": "top middle"
-        }
+        "description": { "zh-cn": "右上角", "en-us": "top middle" }
       },
       {
         "label": "left_middle",
-        "description": {
-          "zh-cn": "正左方",
-          "en-us": "left middle"
-        }
+        "description": { "zh-cn": "正左方", "en-us": "left middle" }
       },
       {
         "label": "center",
-        "description": {
-          "zh-cn": "正中间",
-          "en-us": "center"
-        }
+        "description": { "zh-cn": "正中间", "en-us": "center" }
       },
       {
         "label": "right_middle",
-        "description": {
-          "zh-cn": "正右方",
-          "en-us": "right middle"
-        }
+        "description": { "zh-cn": "正右方", "en-us": "right middle" }
       },
       {
         "label": "bottom_left",
-        "description": {
-          "zh-cn": "左下角",
-          "en-us": "bottom left"
-        }
+        "description": { "zh-cn": "左下角", "en-us": "bottom left" }
       },
       {
         "label": "bottom_middle",
-        "description": {
-          "zh-cn": "正下方",
-          "en-us": "bottom middle"
-        }
+        "description": { "zh-cn": "正下方", "en-us": "bottom middle" }
       },
       {
         "label": "bottom_right",
-        "description": {
-          "zh-cn": "右下角",
-          "en-us": "bottom right"
-        }
+        "description": { "zh-cn": "右下角", "en-us": "bottom right" }
       }
     ]
   },
   "anchor_to": {
-    "description": {
-      "zh-cn": "子锚点",
-      "en-us": "anchor to"
-    },
+    "description": { "zh-cn": "子锚点", "en-us": "anchor to" },
     "values": [
       {
         "label": "top_left",
-        "description": {
-          "zh-cn": "左上角",
-          "en-us": "top left"
-        }
+        "description": { "zh-cn": "左上角", "en-us": "top left" }
       },
       {
         "label": "top_middle",
-        "description": {
-          "zh-cn": "正上方",
-          "en-us": "top middle"
-        }
+        "description": { "zh-cn": "正上方", "en-us": "top middle" }
       },
       {
         "label": "top_right",
-        "description": {
-          "zh-cn": "右上角",
-          "en-us": "top middle"
-        }
+        "description": { "zh-cn": "右上角", "en-us": "top middle" }
       },
       {
         "label": "left_middle",
-        "description": {
-          "zh-cn": "正左方",
-          "en-us": "left middle"
-        }
+        "description": { "zh-cn": "正左方", "en-us": "left middle" }
       },
       {
         "label": "center",
-        "description": {
-          "zh-cn": "正中间",
-          "en-us": "center"
-        }
+        "description": { "zh-cn": "正中间", "en-us": "center" }
       },
       {
         "label": "right_middle",
-        "description": {
-          "zh-cn": "正右方",
-          "en-us": "right middle"
-        }
+        "description": { "zh-cn": "正右方", "en-us": "right middle" }
       },
       {
         "label": "bottom_left",
-        "description": {
-          "zh-cn": "左下角",
-          "en-us": "bottom left"
-        }
+        "description": { "zh-cn": "左下角", "en-us": "bottom left" }
       },
       {
         "label": "bottom_middle",
-        "description": {
-          "zh-cn": "正下方",
-          "en-us": "bottom middle"
-        }
+        "description": { "zh-cn": "正下方", "en-us": "bottom middle" }
       },
       {
         "label": "bottom_right",
-        "description": {
-          "zh-cn": "右下角",
-          "en-us": "bottom right"
-        }
+        "description": { "zh-cn": "右下角", "en-us": "bottom right" }
       }
     ]
   },
   "layer": {
-    "description": {
-      "zh-cn": "控件层级",
-      "en-us": "layer value"
-    },
+    "description": { "zh-cn": "控件层级", "en-us": "layer value" },
     "values": [
       {
         "label": "value",
@@ -652,10 +1865,7 @@
     ]
   },
   "alpha": {
-    "description": {
-      "zh-cn": "控件的不透明度",
-      "en-us": "alpha value"
-    },
+    "description": { "zh-cn": "控件的不透明度", "en-us": "alpha value" },
     "values": [
       {
         "label": "alpha value",
@@ -671,16 +1881,8 @@
       "en-us": "whether the control enabled"
     },
     "values": [
-      {
-        "label": "true",
-        "kind": 12,
-        "insert_text_format": 1
-      },
-      {
-        "label": "false",
-        "kind": 12,
-        "insert_text_format": 1
-      }
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
     ]
   },
   "inherit_max_sibling_width": {
@@ -689,16 +1891,8 @@
       "en-us": "whether inherit the max sibling width"
     },
     "values": [
-      {
-        "label": "true",
-        "kind": 12,
-        "insert_text_format": 1
-      },
-      {
-        "label": "false",
-        "kind": 12,
-        "insert_text_format": 1
-      }
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
     ]
   },
   "inherit_max_sibling_height": {
@@ -707,16 +1901,8 @@
       "en-us": "whether inherit the max sibling height"
     },
     "values": [
-      {
-        "label": "true",
-        "kind": 12,
-        "insert_text_format": 1
-      },
-      {
-        "label": "false",
-        "kind": 12,
-        "insert_text_format": 1
-      }
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
     ]
   },
   "use_anchored_offset": {
@@ -725,16 +1911,8 @@
       "en-us": "whether child controls use parent anchored"
     },
     "values": [
-      {
-        "label": "true",
-        "kind": 12,
-        "insert_text_format": 1
-      },
-      {
-        "label": "false",
-        "kind": 12,
-        "insert_text_format": 1
-      }
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
     ]
   },
   "follows_cursor": {
@@ -743,16 +1921,8 @@
       "en-us": "whether the control follow the cursor"
     },
     "values": [
-      {
-        "label": "true",
-        "kind": 12,
-        "insert_text_format": 1
-      },
-      {
-        "label": "false",
-        "kind": 12,
-        "insert_text_format": 1
-      }
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
     ]
   },
   "ignored": {
@@ -761,16 +1931,8 @@
       "en-us": "whether the control ignored"
     },
     "values": [
-      {
-        "label": "true",
-        "kind": 12,
-        "insert_text_format": 1
-      },
-      {
-        "label": "false",
-        "kind": 12,
-        "insert_text_format": 1
-      }
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
     ]
   },
   "type": {
@@ -781,137 +1943,116 @@
     "values": [
       {
         "label": "label",
-        "description": {
-          "zh-cn": "文本控件",
-          "en-us": "text control"
-        }
+        "description": { "zh-cn": "文本控件", "en-us": "text control" },
+        "insert_text_format": 1,
+        "insert_text": "\"label\""
       },
       {
         "label": "panel",
-        "description": {
-          "zh-cn": "面板控件",
-          "en-us": "panel"
-        }
+        "description": { "zh-cn": "面板控件", "en-us": "panel" },
+        "insert_text_format": 1,
+        "insert_text": "\"panel\""
       },
       {
         "label": "stack_panel",
-        "description": {
-          "zh-cn": "堆栈面板控件",
-          "en-us": "stack panel"
-        }
+        "description": { "zh-cn": "堆栈面板控件", "en-us": "stack panel" },
+        "insert_text_format": 1,
+        "insert_text": "\"stack_panel\""
       },
       {
         "label": "input_panel",
-        "description": {
-          "zh-cn": "输入面板",
-          "en-us": "input panel"
-        }
+        "description": { "zh-cn": "输入面板", "en-us": "input panel" },
+        "insert_text_format": 1,
+        "insert_text": "\"input_panel\""
       },
       {
         "label": "image",
-        "description": {
-          "zh-cn": "图像",
-          "en-us": "image"
-        }
+        "description": { "zh-cn": "图像", "en-us": "image" },
+        "insert_text_format": 1,
+        "insert_text": "\"image\""
       },
       {
         "label": "button",
-        "description": {
-          "zh-cn": "按钮",
-          "en-us": "button"
-        }
+        "description": { "zh-cn": "按钮", "en-us": "button" },
+        "insert_text_format": 1,
+        "insert_text": "\"button\""
       },
       {
         "label": "toggle",
-        "description": {
-          "zh-cn": "切换按钮",
-          "en-us": "toggle"
-        }
+        "description": { "zh-cn": "切换按钮", "en-us": "toggle" },
+        "insert_text_format": 1,
+        "insert_text": "\"toggle\""
       },
       {
         "label": "dropdown",
-        "description": {
-          "zh-cn": "下拉框",
-          "en-us": "dropdown"
-        }
+        "description": { "zh-cn": "下拉框", "en-us": "dropdown" },
+        "insert_text_format": 1,
+        "insert_text": "\"dropdown\""
       },
       {
         "label": "slider",
-        "description": {
-          "zh-cn": "滑块",
-          "en-us": "slider"
-        }
+        "description": { "zh-cn": "滑块", "en-us": "slider" },
+        "insert_text_format": 1,
+        "insert_text": "\"slider\""
       },
       {
         "label": "edit_box",
-        "description": {
-          "zh-cn": "编辑框",
-          "en-us": "edit box"
-        }
+        "description": { "zh-cn": "编辑框", "en-us": "edit box" },
+        "insert_text_format": 1,
+        "insert_text": "\"edit_box\""
       },
       {
         "label": "custom",
-        "description": {
-          "zh-cn": "custom",
-          "en-us": "custom"
-        }
+        "description": { "zh-cn": "custom", "en-us": "custom" },
+        "insert_text_format": 1,
+        "insert_text": "\"custom\""
       },
       {
         "label": "factory",
-        "description": {
-          "zh-cn": "工厂",
-          "en-us": "factory"
-        }
+        "description": { "zh-cn": "工厂", "en-us": "factory" },
+        "insert_text_format": 1,
+        "insert_text": "\"factory\""
       },
       {
         "label": "scroll_view",
-        "description": {
-          "zh-cn": "scroll view",
-          "en-us": "scroll view"
-        }
+        "description": { "zh-cn": "scroll view", "en-us": "scroll view" },
+        "insert_text_format": 1,
+        "insert_text": "\"scroll_view\""
       },
       {
         "label": "scroll_track",
-        "description": {
-          "zh-cn": "滑块槽",
-          "en-us": "scroll track"
-        }
+        "description": { "zh-cn": "滑块槽", "en-us": "scroll track" },
+        "insert_text_format": 1,
+        "insert_text": "\"scroll_track\""
       },
       {
         "label": "scrollbar_box",
-        "description": {
-          "zh-cn": "滑块",
-          "en-us": "scrollbar box"
-        }
+        "description": { "zh-cn": "滑块", "en-us": "scrollbar box" },
+        "insert_text_format": 1,
+        "insert_text": "\"scrollbar_box\""
       },
       {
         "label": "selection_wheel",
-        "description": {
-          "zh-cn": "选择轮盘",
-          "en-us": "selection wheel"
-        }
+        "description": { "zh-cn": "选择轮盘", "en-us": "selection wheel" },
+        "insert_text_format": 1,
+        "insert_text": "\"selection_wheel\""
       },
       {
         "label": "screen",
-        "description": {
-          "zh-cn": "屏幕",
-          "en-us": "screen"
-        }
+        "description": { "zh-cn": "屏幕", "en-us": "screen" },
+        "insert_text_format": 1,
+        "insert_text": "\"screen\""
       },
       {
         "label": "grid",
-        "description": {
-          "zh-cn": "网格布局",
-          "en-us": "grid"
-        }
+        "description": { "zh-cn": "网格布局", "en-us": "grid" },
+        "insert_text_format": 1,
+        "insert_text": "\"grid\""
       }
     ]
   },
   "controls": {
-    "description": {
-      "zh-cn": "添加子控件",
-      "en-us": "Add subcontrol"
-    },
+    "description": { "zh-cn": "添加子控件", "en-us": "Add subcontrol" },
     "values": [
       {
         "label": "value",
@@ -922,10 +2063,7 @@
     ]
   },
   "bindings": {
-    "description": {
-      "zh-cn": "添加绑定",
-      "en-us": "Add bindings"
-    },
+    "description": { "zh-cn": "添加绑定", "en-us": "Add bindings" },
     "values": [
       {
         "label": "value",
@@ -936,22 +2074,19 @@
     ]
   },
   "variables": {
-    "description": {
-      "zh-cn": "创建变量",
-      "en-us": "create variables"
-    },
+    "description": { "zh-cn": "创建变量", "en-us": "create variables" },
     "values": [
       {
         "label": "single",
         "kind": 15,
         "insert_text_format": 2,
-        "insert_text": "{\"requires\": \"$1\",\"$2\": \"$3\"}"
+        "insert_text": "{\"requires\": \"$1\",\"$2\": \"$0\"}"
       },
       {
         "label": "multiple",
         "kind": 15,
         "insert_text_format": 2,
-        "insert_text": "[\n\t{\"requires\": \"$1\",\"$2\": \"$3\"}\n]"
+        "insert_text": "[\n\t{\"requires\": \"$1\",\"$2\": \"$0\"}\n]"
       }
     ]
   },
@@ -961,16 +2096,8 @@
       "en-us": "whether the control visible"
     },
     "values": [
-      {
-        "label": "true",
-        "kind": 12,
-        "insert_text_format": 1
-      },
-      {
-        "label": "false",
-        "kind": 12,
-        "insert_text_format": 1
-      }
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
     ]
   }
 }
