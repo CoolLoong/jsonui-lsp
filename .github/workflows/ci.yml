@@ -49,7 +49,7 @@ jobs:
           profile: minimal
           override: true
       - name: cross build
-        run: cargo install cross && cross build --verbose --release --target=${{ matrix.rust_target }}
+        run: rustup target add =${{ matrix.rust_target }} && cargo build --verbose --release --target=${{ matrix.rust_target }}
       - run: npm install
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
