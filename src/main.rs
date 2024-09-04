@@ -252,7 +252,6 @@ impl LanguageServer for Backend {
 
     // trigger in file change
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        trace!("did_change");
         let url = &params.text_document.uri;
         let key = hash_uri(url);
         let cmp_map = self.completers.lock().await;

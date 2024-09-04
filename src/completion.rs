@@ -383,11 +383,9 @@ impl Completer {
     }
 
     pub async fn complete_color(&self) -> Option<Vec<ColorInformation>> {
-        trace!("complete_color");
         let pos = {
             let ast = self.ast.lock().await;
             if ast.is_none() {
-                trace!("ast is null");
                 return None;
             }
             let inputs: &Vec<Value> = ast.as_ref().unwrap();
@@ -409,7 +407,6 @@ impl Completer {
         
         let ast = self.ast.lock().await;
         if ast.is_none() {
-            trace!("ast is null");
             return None;
         }
         let inputs: &Vec<Value> = ast.as_ref().unwrap();
@@ -440,10 +437,8 @@ impl Completer {
         }
 
         if color_infos.is_empty() {
-            trace!("is null");
             None
         } else {
-            trace!("color info");
             Some(color_infos)
         }
     }
