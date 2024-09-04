@@ -2,7 +2,6 @@ use crate::completion_helper::from_color_value_to_color_arr;
 use crate::Backend;
 use crate::{completion_helper::create_completion, document::Document};
 use log::{debug, trace};
-use std::borrow::Borrow;
 use std::{
     cell::RefCell,
     collections::VecDeque,
@@ -12,8 +11,7 @@ use std::{
 };
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{
-    Color, ColorInformation, CompletionItem, CompletionParams, DidChangeTextDocumentParams,
-    DocumentColorParams, Position, Range, Url,
+    ColorInformation, CompletionItem, CompletionParams, DidChangeTextDocumentParams, Position, Range, Url,
 };
 
 #[derive(Debug, PartialEq, Clone)]

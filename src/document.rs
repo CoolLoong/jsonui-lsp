@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, sync::Arc};
 
 use tokio::sync::Mutex;
-use tower_lsp::lsp_types::{DidChangeTextDocumentParams, Position, Range};
+use tower_lsp::lsp_types::{DidChangeTextDocumentParams, Position};
 use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug)]
