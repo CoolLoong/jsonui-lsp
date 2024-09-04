@@ -6,12 +6,12 @@ use tower_lsp::lsp_types::{
     InsertTextFormat, Position, Range, TextEdit,
 };
 
-fn create_binding_type_input(
-    ast: &Vec<Value>,
-    define_map: &HashMap<String, serde_json::Value>,
-    current: &Value,
-) -> Vec<serde_json::Value> {
-    let mut inputs: Vec<serde_json::Value> = vec![];
+fn create_binding_type_input<'a>(
+    ast: &'a Vec<Value>,
+    define_map: &'a HashMap<String, serde_json::Value>,
+    current: &'a Value,
+) -> Vec<&'a serde_json::Value> {
+    let mut inputs: Vec<&serde_json::Value> = vec![];
     let path = &current.path;
     let binding_type: Option<&Value> = if path.len() > 1
         && let Some(Node::Array(arr)) = &ast[path[0]].v
@@ -35,15 +35,15 @@ fn create_binding_type_input(
         && let Some(Node::String(bt_n)) = &bt.v
         && let Some(serde_json::Value::Array(arr)) = define_map.get(bt_n.as_ref())
     {
-        inputs.append(&mut arr.clone());
+        inputs.extend(&mut arr.iter());
     }
-    inputs.append(
+    inputs.extend(
         &mut define_map
             .get("bindings_properties")
             .unwrap()
             .as_array()
             .unwrap()
-            .clone(),
+            .iter(),
     );
     inputs
 }
@@ -97,20 +97,20 @@ pub(crate) async fn create_completion<'a>(
         && (current_v.path.len() == 2 || current_v.type_id == TYPE_CR)
     {
         trace!("create_type_completion");
-        let mut inputs: Vec<serde_json::Value> = vec![];
+        let mut inputs: Vec<&serde_json::Value> = vec![];
         if let Some(c_type) = type_c.as_ref()//fill type property
             && let Some(serde_json::Value::Array(arr)) = define_map.get(c_type.as_ref())
         {
-            inputs.append(&mut arr.clone());
+            inputs.extend(arr.iter());
         }
-        inputs.append(
+        inputs.extend(
             //fill common property
             &mut define_map
                 .get("common")
                 .unwrap()
                 .as_array()
                 .unwrap()
-                .clone(),
+                .iter(),
         );
         return create_type_completion(&inputs, param, lang, define_map);
     }
@@ -118,7 +118,7 @@ pub(crate) async fn create_completion<'a>(
 }
 
 fn create_type_completion(
-    inputs: &Vec<serde_json::Value>,
+    inputs: &Vec<&serde_json::Value>,
     param: &CompletionParams,
     lang: &str,
     define_map: &HashMap<String, serde_json::Value>,

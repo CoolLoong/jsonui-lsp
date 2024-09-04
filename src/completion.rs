@@ -364,8 +364,7 @@ impl Completer {
         param: &CompletionParams,
     ) -> Option<Vec<CompletionItem>> {
         let context: CompleteContext = CompleteContext::empty();
-        self.update_ast(&context, &param.text_document_position.position)
-            .await;
+        self.update_ast(&context, &param.text_document_position.position).await;
 
         let ast_lock = self.ast.lock().await;
         if let Some(ast) = ast_lock.as_ref() {
@@ -388,6 +387,7 @@ impl Completer {
         let pos = {
             let ast = self.ast.lock().await;
             if ast.is_none() {
+                trace!("ast is null");
                 return None;
             }
             let inputs: &Vec<Value> = ast.as_ref().unwrap();
@@ -403,11 +403,13 @@ impl Completer {
             let context: CompleteContext = CompleteContext::empty();
             self.update_ast(&context, &pos_v).await;
         }else{
+            trace!("pos is null");
             return None;
         }
         
         let ast = self.ast.lock().await;
         if ast.is_none() {
+            trace!("ast is null");
             return None;
         }
         let inputs: &Vec<Value> = ast.as_ref().unwrap();
@@ -438,8 +440,10 @@ impl Completer {
         }
 
         if color_infos.is_empty() {
+            trace!("is null");
             None
         } else {
+            trace!("color info");
             Some(color_infos)
         }
     }
@@ -515,6 +519,7 @@ impl Completer {
             *context.r.lock().await = r;
         } else {
             debug!("build ast error");
+            *self.ast.lock().await = None;
         }
     }
 
