@@ -48,14 +48,18 @@ jobs:
           toolchain: nightly
           profile: minimal
           override: true
-      - name: Install dependencies
+      - name: Install Cross
         if: matrix.arch == 'arm64' && matrix.os == 'ubuntu-latest'
+        run: cargo install cross
+      - name: Build with Cargo or Cross
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
-          echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-      - name: cross build
-        run: rustup set auto-self-update disable && rustup target add ${{ matrix.rust_target }} && cargo build --verbose --release --target=${{ matrix.rust_target }}
+          if [ "${{ matrix.arch }}" == "arm64" ] && [ "${{ matrix.os }}" == "ubuntu-latest" ]; then
+            cross build --verbose --release --target=${{ matrix.rust_target }}
+          else
+            rustup set auto-self-update disable
+            rustup target add ${{ matrix.rust_target }}
+            cargo build --verbose --release --target=${{ matrix.rust_target }}
+          fi
       - run: npm install
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -63,8 +67,8 @@ jobs:
       - name: Move execute file
         run: |
           npx webpack --mode production --config webpack.config.js
-          node -e "try {fs.renameSync('target/${process.env.TARGET}/release/jsonui-lsp', 'dist');}catch(err) {}"
-          node -e "try {fs.renameSync('target/${process.env.TARGET}/release/jsonui-lsp.exe', 'dist');}catch(err) {}"
+          node -e node -e "const fs = require('fs'); const path = require('path'); const targetDir = process.env.TARGET; const sourcePath = path.join('target', targetDir, 'release', 'jsonui-lsp'); const destPath = 'dist'; try { fs.renameSync(sourcePath, destPath); console.log('File moved successfully'); } catch (err) {}"
+          node -e node -e "const fs = require('fs'); const path = require('path'); const targetDir = process.env.TARGET; const sourcePath = path.join('target', targetDir, 'release', 'jsonui-lsp.exe'); const destPath = 'dist'; try { fs.renameSync(sourcePath, destPath); console.log('File moved successfully'); } catch (err) {}"
         env:
           TARGET: ${{ matrix.rust_target }}
       - shell: pwsh
