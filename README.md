@@ -2,7 +2,7 @@
 
 ### Introduction
 This VSCode extension enhances the creation of Minecraft Bedrock JSON-UI by providing intelligent auto-completion features. It speeds up the development process and helps developers efficiently create and edit JSON-UI files.
-<img src=".github/img/show1.gif" width="50%"/>
+<img src=".github/img/show1.gif" width="60%"/>
 
 ### Features
 - **Property and Value Auto-Completion**: Offers efficient auto-completion for JSON-UI control properties and values.

@@ -4,7 +4,8 @@
   "publisher": "CoolLoong",
   "license": "MIT",
   "version": "0.0.1",
-  "categories": [],
+  "icon": "icon.png",
+  "categories": ["Snippets"],
   "keywords": [
     "minecraft",
     "bedrock",
