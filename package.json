@@ -56,7 +56,7 @@
     "onLanguage:json"
   ],
   "scripts": {
-    "postinstall": "cd client && pnpm i",
+    "postinstall": "cd client && npm i",
     "vscode:prepublish": "npm run build",
     "test-compile": "tsc -p ./",
     "compile": "cross-env NODE_ENV=production tsc -b",

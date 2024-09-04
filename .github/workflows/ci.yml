@@ -48,11 +48,13 @@ jobs:
           toolchain: nightly
           profile: minimal
           override: true
-      - name: Install dependencies
+      - shell: pwsh
+        name: Install dependencies
         if: matrix.arch == 'arm64' && matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get install -y gcc-aarch64-linux-gnu libc6-dev-arm64-cross
+          echo "CC=aarch64-linux-gnu-gcc" >> $env:$GITHUB_ENV
       - name: cross build
         run: rustup set auto-self-update disable && rustup target add ${{ matrix.rust_target }} && cargo build --verbose --release --target=${{ matrix.rust_target }}
       - run: npm install
