@@ -62,11 +62,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           npm_config_arch: ${{ matrix.npm_config_arch }}
-      - name: Move execute file
+      - name: build client and move execute file
         run: |
           npx webpack --mode production --config webpack.config.js
-          node -e node -e "const fs = require('fs'); const path = require('path'); const targetDir = process.env.TARGET; const sourcePath = path.join('target', targetDir, 'release', 'jsonui-lsp'); const destPath = 'dist'; try { fs.renameSync(sourcePath, destPath); console.log('File moved successfully'); } catch (err) {}"
-          node -e node -e "const fs = require('fs'); const path = require('path'); const targetDir = process.env.TARGET; const sourcePath = path.join('target', targetDir, 'release', 'jsonui-lsp.exe'); const destPath = 'dist'; try { fs.renameSync(sourcePath, destPath); console.log('File moved successfully'); } catch (err) {}"
+          node -e "const fs = require('fs'); const path = require('path'); const targetDir = process.env.TARGET; const sourcePaths = ['target/' + targetDir + '/release/jsonui-lsp', 'target/' + targetDir + '/release/jsonui-lsp.exe']; const destDir = 'dist'; sourcePaths.forEach(sourcePath => { const destPath = path.join(destDir, path.basename(sourcePath)); if (fs.existsSync(sourcePath)) { fs.renameSync(sourcePath, destPath); console.log('File', path.basename(sourcePath), 'moved successfully to', destPath); } else { console.log('File', path.basename(sourcePath), 'not found at', sourcePath); } });"
         env:
           TARGET: ${{ matrix.rust_target }}
       - shell: pwsh

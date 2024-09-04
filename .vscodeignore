@@ -1,5 +1,6 @@
 .cargo
 .vscode
+.github
 client/**
 node_modules
 out
