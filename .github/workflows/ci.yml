@@ -53,13 +53,11 @@ jobs:
         run: cargo install cross
       - name: Build with Cargo or Cross
         run: |
-          if [ "${{ matrix.arch }}" == "arm64" ] && [ "${{ matrix.os }}" == "ubuntu-latest" ]; then
-            cross build --verbose --release --target=${{ matrix.rust_target }}
-          else
-            rustup set auto-self-update disable
-            rustup target add ${{ matrix.rust_target }}
-            cargo build --verbose --release --target=${{ matrix.rust_target }}
-          fi
+          node -e "const { execSync } = require('child_process'); const arch = process.env.MATRIX_ARCH; const os = process.env.MATRIX_OS; const rustTarget = process.env.MATRIX_RUST_TARGET; if (arch === 'arm64' && os === 'ubuntu-latest') { console.log('Using cross to build...'); execSync('cross build --verbose --release --target=' + rustTarget, { stdio: 'inherit' }); } else { console.log('Using cargo to build...'); execSync('rustup set auto-self-update disable', { stdio: 'inherit' }); execSync('rustup target add ' + rustTarget, { stdio: 'inherit' }); execSync('cargo build --verbose --release --target=' + rustTarget, { stdio: 'inherit' }); }"
+        env:
+          MATRIX_ARCH: ${{ matrix.arch }}
+          MATRIX_OS: ${{ matrix.os }}
+          MATRIX_RUST_TARGET: ${{ matrix.rust_target }}
       - run: npm install
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
