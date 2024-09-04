@@ -55,7 +55,6 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu
       - name: cross build
         run: rustup set auto-self-update disable && rustup target add ${{ matrix.rust_target }} && cargo build --verbose --release --target=${{ matrix.rust_target }}
-        CC: ${{ matrix.arch == 'arm64' && matrix.os == 'ubuntu-latest' && 'aarch64-linux-gnu-gcc' || '' }}
       - run: npm install
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
