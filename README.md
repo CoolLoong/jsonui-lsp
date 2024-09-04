@@ -2,7 +2,7 @@
 
 ### Introduction
 This VSCode extension enhances the creation of Minecraft Bedrock JSON-UI by providing intelligent auto-completion features. It speeds up the development process and helps developers efficiently create and edit JSON-UI files.
-![Property and Value Auto-Completion](.github/img/show1.gif)
+<img src=".github/img/show1.gif" width="50%"/>
 
 ### Features
 - **Property and Value Auto-Completion**: Offers efficient auto-completion for JSON-UI control properties and values.
@@ -14,6 +14,16 @@ This VSCode extension enhances the creation of Minecraft Bedrock JSON-UI by prov
 
 ### Contributing
 Contributions are welcome!
+
+#### Complie guide
+Development IDE with `vscode`, prepare `rust` and `nodejs` environment.
+Install pnpm package manager.
+1. `pnpm i`
+2. use nightly rust feature
+ `rustup toolchain install nightly`
+ `rustup override set nightly`
+5. `cargo build`
+6. debug use `F5`
 
 ### Roadmap
 - Support auto-completion for additional controls (via the `jsonui_define.json` file)
