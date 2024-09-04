@@ -19,7 +19,6 @@
   "engines": {
     "vscode": "^1.66.0"
   },
-  "enabledApiProposals": [],
   "main": "./dist/extension.js",
   "contributes": {
     "languages": [
