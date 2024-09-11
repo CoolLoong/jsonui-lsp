@@ -11,10 +11,13 @@ use std::{
 };
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{
-    ColorInformation, CompletionItem, CompletionParams, DidChangeTextDocumentParams, Position, Range, Url,
+    ColorInformation, CompletionItem, CompletionParams, DidChangeTextDocumentParams, Position,
+    Range, Url,
 };
 
 #[derive(Debug, PartialEq, Clone)]
+/// Defines an enum named `Token` with variants representing different characters as
+/// their integer values. Each variant is assigned a character value casted to an `isize` type
 pub enum Token {
     LeftBrace = '{' as isize,
     RightBrace = '}' as isize,
@@ -34,13 +37,22 @@ pub const TYPE_BOL: u8 = 6;
 pub const TYPE_COL: u8 = 7;
 pub const TYPE_COM: u8 = 8;
 
+/// The `Value` struct represents a parsed source token
+///
+/// Properties:
+///
+/// * `l`: represents a left index in `Document`
+/// * `r`: represents a right index in `Document`
+/// * `type_id`: type constant
+/// * `path`: shows the layer of the current `Value`
+/// * `v`: parsed value
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Value {
     pub(crate) l: usize,
     pub(crate) r: usize,
     pub(crate) type_id: u8,
     pub(crate) path: Vec<usize>,
-    pub(crate) v: Option<Node>,
+    pub(crate) v: Option<ParsedToken>,
 }
 
 impl Value {
@@ -68,8 +80,12 @@ impl fmt::Debug for Value {
     }
 }
 
+/// Enum `ParsedToken` with different variants representing parsed tokens
+/// in a data structure. The variants include `Controls` and `Array`, which contain vectors of `Value`,
+/// `String` which contains an `Arc<str>`, `Number` which contains a floating-point number, `Bool` which
+/// contains a boolean value, and `Colon`, `Comma`.
 #[derive(Clone)]
-pub enum Node {
+pub enum ParsedToken {
     Controls(Vec<Value>),
     Array(Vec<Value>),
     String(Arc<str>),
@@ -79,10 +95,10 @@ pub enum Node {
     Comma,
 }
 
-impl fmt::Debug for Node {
+impl fmt::Debug for ParsedToken {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Node::Controls(controls) => {
+            ParsedToken::Controls(controls) => {
                 writeln!(f, "{{")?;
                 for (i, control) in controls.iter().enumerate() {
                     if i > 0 {
@@ -92,7 +108,7 @@ impl fmt::Debug for Node {
                 }
                 write!(f, "\n}}")
             }
-            Node::Array(array) => {
+            ParsedToken::Array(array) => {
                 writeln!(f, "[")?;
                 for (i, item) in array.iter().enumerate() {
                     if i > 0 {
@@ -102,27 +118,27 @@ impl fmt::Debug for Node {
                 }
                 write!(f, "\n]")
             }
-            Node::String(s) => write!(f, "\"{}\"", s),
-            Node::Number(n) => write!(f, "{}", n),
-            Node::Bool(b) => write!(f, "{}", b),
-            Node::Colon => write!(f, "Colon"),
-            Node::Comma => write!(f, "Comma"),
+            ParsedToken::String(s) => write!(f, "\"{}\"", s),
+            ParsedToken::Number(n) => write!(f, "{}", n),
+            ParsedToken::Bool(b) => write!(f, "{}", b),
+            ParsedToken::Colon => write!(f, "Colon"),
+            ParsedToken::Comma => write!(f, "Comma"),
         }
     }
 }
 
-impl Eq for Node {}
+impl Eq for ParsedToken {}
 
-impl PartialEq for Node {
+impl PartialEq for ParsedToken {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Node::Bool(a), Node::Bool(b)) => a.eq(b),
-            (Node::Number(a), Node::Number(b)) => (a - b).abs() < f32::EPSILON,
-            (Node::String(a), Node::String(b)) => a.eq(b),
-            (Node::Array(a), Node::Array(b)) => a.eq(b),
-            (Node::Controls(a), Node::Controls(b)) => a.eq(b),
-            (Node::Colon, Node::Colon) => true,
-            (Node::Comma, Node::Comma) => true,
+            (ParsedToken::Bool(a), ParsedToken::Bool(b)) => a.eq(b),
+            (ParsedToken::Number(a), ParsedToken::Number(b)) => (a - b).abs() < f32::EPSILON,
+            (ParsedToken::String(a), ParsedToken::String(b)) => a.eq(b),
+            (ParsedToken::Array(a), ParsedToken::Array(b)) => a.eq(b),
+            (ParsedToken::Controls(a), ParsedToken::Controls(b)) => a.eq(b),
+            (ParsedToken::Colon, ParsedToken::Colon) => true,
+            (ParsedToken::Comma, ParsedToken::Comma) => true,
             _ => false,
         }
     }
@@ -150,6 +166,8 @@ impl From<Token> for char {
 }
 
 impl Token {
+    /// The function `is_ignore` returns a boolean value indicating whether the input character `c` is a
+    /// whitespace character (space), carriage return ("\r\n"), or newline ("\n").
     pub fn is_ignore(c: &str) -> bool {
         matches!(c, " " | "\r\n" | "\n")
     }
@@ -181,6 +199,7 @@ impl<'a> CompleteContext<'a> {
 }
 
 /// `PathInfo` is used to record the path information of nodes within the built AST.
+/// it shows the layer of the current `Value`
 struct PathInfo {
     stack: RefCell<VecDeque<usize>>,
     current: RefCell<usize>,
@@ -237,6 +256,14 @@ impl PathInfo {
 }
 
 #[derive(Debug)]
+/// The `Completer` struct in Rust contains a `Document` and a Node stack call `ast`
+///
+/// Properties:
+///
+/// * `document`: The `document` property holds the source data and can be updated during editing.
+/// * `ast`: The `ast` property in the `Completer` struct is a `Mutex` that contains an `Option` of a
+/// vector of `Value` elements. This allows for safe concurrent access to the AST (Abstract Syntax Tree)
+/// data stored within the `Completer` struct.
 pub(crate) struct Completer {
     document: Document,
     ast: Mutex<Option<Vec<Value>>>,
@@ -282,12 +309,12 @@ impl Completer {
         Self::flatten_ast_one_layer(ast, &mut result);
         for (index, i) in result.iter().enumerate() {
             if i.type_id == TYPE_STR
-                && let Some(Node::String(v)) = &i.v
+                && let Some(ParsedToken::String(v)) = &i.v
                 && v.as_ref() == "type"
             {
                 let type_node_index = index + 2;
                 if type_node_index < result.len()
-                    && let Some(Node::String(type_v)) = &result[type_node_index].v
+                    && let Some(ParsedToken::String(type_v)) = &result[type_node_index].v
                 {
                     *context.control_type.lock().await = Some(type_v.clone());
                 }
@@ -296,7 +323,7 @@ impl Completer {
 
         let mut control_type_mut = context.control_type.lock().await;
         if control_type_mut.is_none()
-            && let Some(Node::String(control_name)) = &ast[0].v
+            && let Some(ParsedToken::String(control_name)) = &ast[0].v
         {
             let namespace: Option<Arc<str>> = bk.query_namespace(docs_url).await;
             let control_t = Self::fill_control_type(bk, namespace, control_name).await;
@@ -362,7 +389,8 @@ impl Completer {
         param: &CompletionParams,
     ) -> Option<Vec<CompletionItem>> {
         let context: CompleteContext = CompleteContext::empty();
-        self.update_ast(&context, &param.text_document_position.position).await;
+        self.update_ast(&context, &param.text_document_position.position)
+            .await;
 
         let ast_lock = self.ast.lock().await;
         if let Some(ast) = ast_lock.as_ref() {
@@ -395,14 +423,14 @@ impl Completer {
                 None
             }
         };
-        if let Some(pos_v) = pos{
+        if let Some(pos_v) = pos {
             let context: CompleteContext = CompleteContext::empty();
             self.update_ast(&context, &pos_v).await;
-        }else{
-            trace!("pos is null");
+        } else {
+            trace!("pos is null in complete_color");
             return None;
         }
-        
+
         let ast = self.ast.lock().await;
         if ast.is_none() {
             return None;
@@ -415,7 +443,7 @@ impl Completer {
         let mut iter = results.iter();
         while let Some(color_v) = iter
             .by_ref()
-            .skip_while(|r| !matches!(&r.v, Some(Node::String(v)) if v.as_ref() == "color"))
+            .skip_while(|r| !matches!(&r.v, Some(ParsedToken::String(v)) if v.as_ref() == "color"))
             .nth(2)
         {
             if let (Some(left_v), Some(right_v)) = (
@@ -461,6 +489,8 @@ impl Completer {
             let iter = splice_control.iter().enumerate();
             let path_info: &PathInfo = &PathInfo::new();
 
+            // trace!("{:?}",splice_control);
+
             for (index, c) in iter {
                 let i = index + l;
                 let str = c.as_ref();
@@ -486,14 +516,14 @@ impl Completer {
                             r: i + 1,
                             type_id: TYPE_COL,
                             path: path_info.get_path(),
-                            v: Some(Node::Colon),
+                            v: Some(ParsedToken::Colon),
                         });
                     }
                     Token::RightBrace if Self::not_quote_state(&stack) => {
                         Self::handle_right_brace(&mut stack, i, path_info)
                     }
                     Token::RightBracket if Self::not_quote_state(&stack) => {
-                        Self::handle_right_bracket(&mut stack, i, path_info)
+                        Self::handle_right_bracket(&mut stack, &mut str_builder, i, path_info)
                     }
                     Token::Comma if Self::not_quote_state(&stack) => {
                         Self::handle_comma(&mut stack, &mut str_builder, i, path_info)
@@ -521,7 +551,7 @@ impl Completer {
             if let Some(v) = &i.v {
                 result.push(i);
                 match v {
-                    Node::Array(sub) | Node::Controls(sub) => {
+                    ParsedToken::Array(sub) | ParsedToken::Controls(sub) => {
                         Self::flatten_ast(sub, result);
                     }
                     _ => {}
@@ -534,7 +564,7 @@ impl Completer {
         for i in input {
             if let Some(v) = &i.v {
                 result.push(i);
-                if let Node::Array(sub) | Node::Controls(sub) = v {
+                if let ParsedToken::Array(sub) | ParsedToken::Controls(sub) = v {
                     for sub_value in sub {
                         result.push(sub_value);
                     }
@@ -567,7 +597,7 @@ impl Completer {
                 r: index + 1,
                 type_id: TYPE_STR,
                 path: path_info.get_path(),
-                v: Some(Node::String(Arc::from(str_builder.clone()))),
+                v: Some(ParsedToken::String(Arc::from(str_builder.clone()))),
             });
             str_builder.clear();
         }
@@ -584,7 +614,7 @@ impl Completer {
                     r: index + 1,
                     type_id: TYPE_CR,
                     path: f.path,
-                    v: Some(Node::Controls(tmp_vec)),
+                    v: Some(ParsedToken::Controls(tmp_vec)),
                 });
                 return;
             } else {
@@ -593,7 +623,13 @@ impl Completer {
         }
     }
 
-    fn handle_right_bracket(stack: &mut VecDeque<Value>, index: usize, path_info: &PathInfo) {
+    fn handle_right_bracket(
+        stack: &mut VecDeque<Value>,
+        str_builder: &mut String,
+        index: usize,
+        path_info: &PathInfo,
+    ) {
+        Completer::collect_value(stack, str_builder, index, path_info);
         let mut tmp_vec: Vec<Value> = Vec::new();
         while let Some(f) = stack.pop_back() {
             if TYPE_ARR == f.type_id && f.v.is_none() {
@@ -604,7 +640,7 @@ impl Completer {
                     r: index + 1,
                     type_id: TYPE_ARR,
                     path: f.path,
-                    v: Some(Node::Array(tmp_vec)),
+                    v: Some(ParsedToken::Array(tmp_vec)),
                 });
                 return;
             } else {
@@ -613,7 +649,25 @@ impl Completer {
         }
     }
 
+    /// The `handle_comma` function is represent comma grammar rule,it parses a string into a comma token and pushes to stack
     fn handle_comma(
+        stack: &mut VecDeque<Value>,
+        str_builder: &mut String,
+        index: usize,
+        path_info: &PathInfo,
+    ) {
+        Completer::collect_value(stack, str_builder, index, path_info);
+        stack.push_back(Value {
+            l: index,
+            r: index + 1,
+            type_id: TYPE_COM,
+            path: path_info.get_path(),
+            v: Some(ParsedToken::Comma),
+        });
+    }
+
+    /// The function `collect_value` parses a string into a boolean or float value and pushes to stack
+    fn collect_value(
         stack: &mut VecDeque<Value>,
         str_builder: &mut String,
         index: usize,
@@ -627,7 +681,7 @@ impl Completer {
                     r: index + str_c + 1,
                     type_id: TYPE_BOL,
                     path: path_info.get_path(),
-                    v: Some(Node::Bool(boolean)),
+                    v: Some(ParsedToken::Bool(boolean)),
                 });
             } else if let Ok(float) = str_builder.parse::<f32>() {
                 stack.push_back(Value {
@@ -635,19 +689,11 @@ impl Completer {
                     r: index + str_c + 1,
                     type_id: TYPE_NUM,
                     path: path_info.get_path(),
-                    v: Some(Node::Number(float)),
+                    v: Some(ParsedToken::Number(float)),
                 });
             }
             str_builder.clear();
         }
-
-        stack.push_back(Value {
-            l: index,
-            r: index + 1,
-            type_id: TYPE_COM,
-            path: path_info.get_path(),
-            v: Some(Node::Comma),
-        });
     }
 }
 

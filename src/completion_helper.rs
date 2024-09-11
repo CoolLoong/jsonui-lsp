@@ -1,10 +1,15 @@
-use crate::completion::{CompleteContext, Node, Value, TYPE_ARR, TYPE_COL, TYPE_CR};
+use crate::completion::{
+    CompleteContext, ParsedToken, Value, TYPE_ARR, TYPE_COL, TYPE_COM, TYPE_CR,
+};
 use log::trace;
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 use tower_lsp::lsp_types::{
     Color, CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionParams,
     InsertTextFormat, Position, Range, TextEdit,
 };
+
+const BINDINGS: &str = "bindings";
+const CONTROLS: &str = "controls";
 
 fn create_binding_type_input<'a>(
     ast: &'a Vec<Value>,
@@ -14,12 +19,12 @@ fn create_binding_type_input<'a>(
     let mut inputs: Vec<&serde_json::Value> = vec![];
     let path = &current.path;
     let binding_type: Option<&Value> = if path.len() > 1
-        && let Some(Node::Array(arr)) = &ast[path[0]].v
-        && let Some(Node::Controls(obj)) = &arr[path[1]].v
+        && let Some(ParsedToken::Array(arr)) = &ast[path[0]].v
+        && let Some(ParsedToken::Controls(obj)) = &arr[path[1]].v
     {
         obj.iter()
             .skip_while(|&v| {
-                if let Some(Node::String(s)) = &v.v
+                if let Some(ParsedToken::String(s)) = &v.v
                     && s.as_ref() == "binding_type"
                 {
                     return false;
@@ -28,11 +33,11 @@ fn create_binding_type_input<'a>(
             })
             .nth(2)
     } else {
+        trace!("cant find binding_type");
         None
     };
-    trace!("binding_type {:?}", binding_type);
     if let Some(bt) = binding_type
-        && let Some(Node::String(bt_n)) = &bt.v
+        && let Some(ParsedToken::String(bt_n)) = &bt.v
         && let Some(serde_json::Value::Array(arr)) = define_map.get(bt_n.as_ref())
     {
         inputs.extend(&mut arr.iter());
@@ -56,7 +61,11 @@ pub(crate) async fn create_completion<'a>(
     context: &CompleteContext<'a>,
     ast: &Vec<Value>,
 ) -> Option<Vec<CompletionItem>> {
-    trace!("{:?}\n\n ast {:?}\n--------------------------------", context, ast);
+    trace!(
+        "{:?}\n\n AST {:?}\n--------------------------------",
+        context,
+        ast
+    );
     let type_c = context.control_type.lock().await;
     let nodes = context.nodes.lock().await;
     let input_c = context.input_char.lock().await;
@@ -65,27 +74,43 @@ pub(crate) async fn create_completion<'a>(
     let n2 = nodes[1];
     let current = nodes[2];
     if let Some(first_ast_v) = ast.first()
-        && let Some(Node::String(if_bindings)) = &first_ast_v.v
-        && if_bindings.as_ref() == "bindings"
+        && let Some(ParsedToken::String(control_name)) = &first_ast_v.v
     {
-        if let Some(nv1) = n1
-            && let Some(Node::String(pn)) = &nv1.v
-            && let Some(nv2) = n2
-            && nv2.type_id == TYPE_COL
-            && (current.is_none() || current.unwrap().type_id != TYPE_ARR)
-        {
-            trace!("create_bindings_value_completion");
-            return create_value_completion(input_c.as_ref(), pn.as_ref(), lang, define_map);
-        } else if input_c.as_ref() == "\""
-            && let Some(current_v) = current
-            && (current_v.path.len() == 3 || current_v.type_id == TYPE_ARR)
-        {
-            trace!("create_bindings_type_completion");
-            let inputs = &create_binding_type_input(ast, define_map, current_v);
-            return create_type_completion(inputs, param, lang, define_map);
+        match control_name.as_ref() {
+            BINDINGS => {
+                if let Some(nv1) = n1
+                    && let Some(ParsedToken::String(pn)) = &nv1.v
+                    && let Some(nv2) = n2
+                    && nv2.type_id == TYPE_COL
+                    && (current.is_none() || current.unwrap().type_id != TYPE_ARR)
+                {
+                    trace!("create_bindings_value_completion");
+                    return create_value_completion(
+                        input_c.as_ref(),
+                        pn.as_ref(),
+                        lang,
+                        define_map,
+                    );
+                } else if let Some(current_v) = current
+                    && let Some(nv2) = n2
+                    && input_c.as_ref() == "\""
+                    && (current_v.type_id == TYPE_ARR
+                        || (nv2.type_id == TYPE_COM && current_v.type_id == TYPE_CR))
+                {
+                    trace!("create_bindings_type_completion");
+                    let inputs = &create_binding_type_input(ast, define_map, current_v);
+                    return create_type_completion(inputs, param, lang, define_map);
+                }
+            }
+            CONTROLS => {
+                return None;
+            }
+            _ => {}
         }
-    } else if let Some(nv1) = n1
-        && let Some(Node::String(pn)) = &nv1.v
+    }
+
+    if let Some(nv1) = n1
+        && let Some(ParsedToken::String(pn)) = &nv1.v
         && let Some(nv2) = n2
         && nv2.type_id == TYPE_COL
         && (current.is_none() || current.unwrap().type_id != TYPE_CR)
@@ -98,19 +123,15 @@ pub(crate) async fn create_completion<'a>(
     {
         trace!("create_type_completion");
         let mut inputs: Vec<&serde_json::Value> = vec![];
-        if let Some(c_type) = type_c.as_ref()//fill type property
+        //fill type property
+        if let Some(c_type) = type_c.as_ref()
             && let Some(serde_json::Value::Array(arr)) = define_map.get(c_type.as_ref())
         {
             inputs.extend(arr.iter());
         }
         inputs.extend(
             //fill common property
-            &mut define_map
-                .get("common")
-                .unwrap()
-                .as_array()
-                .unwrap()
-                .iter(),
+            &mut define_map.get("common").unwrap().as_array().unwrap().iter(),
         );
         return create_type_completion(&inputs, param, lang, define_map);
     }
@@ -225,7 +246,7 @@ fn create_value_completion(
 }
 
 pub(crate) fn from_color_value_to_color_arr(v: &Value) -> Option<Color> {
-    if let Some(Node::String(color_str)) = &v.v {
+    if let Some(ParsedToken::String(color_str)) = &v.v {
         return match color_str.as_ref() {
             "white" => Some(Color {
                 red: 1.0,
@@ -307,21 +328,20 @@ pub(crate) fn from_color_value_to_color_arr(v: &Value) -> Option<Color> {
             }),
             _ => None,
         };
-    } else if let Some(Node::Array(color_arr)) = &v.v {
+    } else if let Some(ParsedToken::Array(color_arr)) = &v.v {
         if color_arr.len() >= 5
-            && let Some(Node::Number(v1)) = color_arr[0].v
+            && let Some(ParsedToken::Number(v1)) = color_arr[0].v
             && v1 >= 0.0
             && v1 <= 1.0
-            && let Some(Node::Number(v2)) = color_arr[2].v
+            && let Some(ParsedToken::Number(v2)) = color_arr[2].v
             && v2 >= 0.0
             && v2 <= 1.0
-            && let Some(Node::Number(v3)) = color_arr[4].v
+            && let Some(ParsedToken::Number(v3)) = color_arr[4].v
             && v3 >= 0.0
             && v3 <= 1.0
         {
-            trace!("{} {} {}",v1,v2,v3);
             if color_arr.len() == 7
-                && let Some(Node::Number(v4)) = color_arr[6].v
+                && let Some(ParsedToken::Number(v4)) = color_arr[6].v
                 && v4 >= 0.0
                 && v4 <= 1.0
             {

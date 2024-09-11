@@ -1,5 +1,6 @@
 use std::{collections::VecDeque, sync::Arc};
 
+use log::trace;
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{DidChangeTextDocumentParams, Position};
 use unicode_segmentation::UnicodeSegmentation;
@@ -8,7 +9,7 @@ use unicode_segmentation::UnicodeSegmentation;
 pub struct Document {
     pub line_info_cache: Mutex<Vec<LineInfo>>,
     pub content_cache: Mutex<String>,
-    pub content_chars: Mutex<Vec<Arc<str>>>
+    pub content_chars: Mutex<Vec<Arc<str>>>,
 }
 
 #[derive(Debug)]
@@ -181,65 +182,96 @@ impl Document {
             return None;
         }
 
-        let f_len = forward.len();
-        let mut left_boundary_char: &str = "{";
-        let mut right_boundary_char: &str = "}";
+        let mut boundary_char_stack1: Vec<&str> = Vec::new(); //for {}
+        let mut boundary_char_stack2: Vec<&str> = Vec::new(); //for []
         let mut start_index: Option<usize> = None;
-        let mut boundary_char_stack: VecDeque<&str> = VecDeque::new();
+        let mut end_index: Option<usize> = None;
+        let mut bound_state = true;
+        let f_len = forward.len();
         let mut forward_iter = forward.iter().rev().peekable().enumerate();
-        let mut collected_str = String::new();
+
         while let Some((_, ch)) = forward_iter.next() {
-            let str = ch.as_ref();
-            if str == left_boundary_char {
-                if boundary_char_stack.is_empty() {
+            let char = ch.as_ref();
+            match char {
+                "{" | "}" => {
+                    if !boundary_char_stack1.is_empty() {
+                        boundary_char_stack1.pop();
+                    } else {
+                        boundary_char_stack1.push(char);
+                    }
+                    bound_state = true;
+                }
+                "[" | "]" => {
+                    if !boundary_char_stack2.is_empty() {
+                        boundary_char_stack2.pop();
+                    } else {
+                        boundary_char_stack2.push(char);
+                    }
+                    bound_state = true;
+                }
+                ":" => {
+                    if !(boundary_char_stack1.len() == 1 || boundary_char_stack2.len() == 1) {
+                        continue;
+                    }
+                    let mut p1 = boundary_char_stack1.iter().peekable();
+                    let mut p2 = boundary_char_stack2.iter().peekable();
+                    if let Some(&&v1) = p1.peek()
+                        && v1 != "{"
+                    {
+                        continue;
+                    }
+                    if let Some(&&v2) = p2.peek()
+                        && v2 != "["
+                    {
+                        continue;
+                    }
+                    if !bound_state {
+                        continue;
+                    }
+
                     let opt = forward_iter
                         .by_ref()
                         .skip_while(|(_, c)| c.as_ref() != "\"")
                         .skip(1)
-                        .skip_while(|(_, c)| {
-                            if c.as_ref() != "\"" {
-                                collected_str.push_str(c);
-                                true
-                            } else {
-                                false
-                            }
-                        })
+                        .skip_while(|(_, c)| c.as_ref() != "\"")
                         .nth(1);
                     if let Some((index, _)) = opt {
-                        if collected_str == "sgnidnib" || collected_str == "slortnoc" {
-                            forward_iter = forward.iter().rev().peekable().enumerate();
-                            left_boundary_char = "[";
-                            right_boundary_char = "]";
-                            continue;
-                        }
                         start_index = Some(f_len - index);
                         break;
-                    } else {
-                        return None;
                     }
-                } else {
-                    boundary_char_stack.pop_back();
                 }
-            } else if str == right_boundary_char {
-                boundary_char_stack.push_back(str);
+                _ if !matches!(char, " " | "\r\n" | "\n") => {
+                    bound_state &= false;
+                }
+                _ => {}
             }
         }
-        let start_index_v = start_index?;
-        boundary_char_stack.clear();
 
-        let mut end_index: Option<usize> = None;
+        let start_index_v = start_index?;
+
         let backend_iter = backward.iter().peekable().enumerate();
         for (index, ch) in backend_iter {
-            let str = ch.as_ref();
-            if str == right_boundary_char {
-                if boundary_char_stack.is_empty() {
-                    end_index = Some(index + f_len);
-                    break;
-                } else {
-                    boundary_char_stack.pop_back();
+            let char = ch.as_ref();
+            match char {
+                "{" | "}" => {
+                    if !boundary_char_stack1.is_empty() {
+                        boundary_char_stack1.pop();
+                    } else {
+                        boundary_char_stack1.push(char);
+                    }
                 }
-            } else if str == left_boundary_char {
-                boundary_char_stack.push_back(str);
+                "[" | "]" => {
+                    if !boundary_char_stack2.is_empty() {
+                        boundary_char_stack2.pop();
+                    } else {
+                        boundary_char_stack2.push(char);
+                    }
+                }
+                _ => {}
+            }
+            if boundary_char_stack1.is_empty() && boundary_char_stack2.is_empty() {
+                end_index = Some(index + f_len);
+                break;
             }
         }
         let end_index_v = end_index?;
@@ -332,12 +364,12 @@ mod tests {
             content_changes: vec![TextDocumentContentChangeEvent {
                 range: Some(Range {
                     start: Position {
-                        line: 24,
-                        character: 25,
+                        line: 23,
+                        character: 23,
                     },
                     end: Position {
-                        line: 24,
-                        character: 30,
+                        line: 23,
+                        character: 27,
                     },
                 }),
                 range_length: None,
@@ -346,9 +378,8 @@ mod tests {
         };
         document.apply_change(&request).await;
         let docs = document.content_cache.lock().await;
-        println!("{}", docs);
         #[rustfmt::skip]
-        assert!(docs.contains("\"clip_pixelperfect\": \n  },"));
+        assert!(docs.contains("\"clip_direction\": \"\""));
     }
 
     #[tokio::test]
