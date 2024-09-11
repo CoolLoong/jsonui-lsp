@@ -2,7 +2,7 @@ use crate::completion::{
     CompleteContext, ParsedToken, Value, TYPE_ARR, TYPE_COL, TYPE_COM, TYPE_CR,
 };
 use log::trace;
-use std::{collections::HashMap, sync::Arc};
+use std::collections::HashMap;
 use tower_lsp::lsp_types::{
     Color, CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionParams,
     InsertTextFormat, Position, Range, TextEdit,

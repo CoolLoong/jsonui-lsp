@@ -1,6 +1,5 @@
-use std::{collections::VecDeque, sync::Arc};
+use std::sync::Arc;
 
-use log::trace;
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{DidChangeTextDocumentParams, Position};
 use unicode_segmentation::UnicodeSegmentation;
