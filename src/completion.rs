@@ -15,9 +15,9 @@ use tower_lsp::lsp_types::{
     Range, Url,
 };
 
-#[derive(Debug, PartialEq, Clone)]
 /// Defines an enum named `Token` with variants representing different characters as
 /// their integer values. Each variant is assigned a character value casted to an `isize` type
+#[derive(Debug, PartialEq, Clone)]
 pub enum Token {
     LeftBrace = '{' as isize,
     RightBrace = '}' as isize,
@@ -55,16 +55,6 @@ pub(crate) struct Value {
     pub(crate) v: Option<ParsedToken>,
 }
 
-impl Value {
-    pub fn is_some(&self) -> bool {
-        self.v.is_some()
-    }
-
-    pub fn is_none(&self) -> bool {
-        self.v.is_none()
-    }
-}
-
 impl fmt::Debug for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
@@ -97,26 +87,32 @@ pub enum ParsedToken {
 
 impl fmt::Debug for ParsedToken {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fn fmt_indented(f: &mut fmt::Formatter, tokens: &[Value], indent_level: usize) -> fmt::Result {
+            let indent = " ".repeat(indent_level * 4);
+            writeln!(f, "{}{{", indent)?;
+            for (i, token) in tokens.iter().enumerate() {
+                if i > 0 {
+                    writeln!(f, ",")?;
+                }
+                write!(f, "{}", indent)?;
+                write!(f, "{:?}", token)?;
+            }
+            writeln!(f, "\n{}}}", indent)
+        }
+
         match self {
             ParsedToken::Controls(controls) => {
-                writeln!(f, "{{")?;
-                for (i, control) in controls.iter().enumerate() {
-                    if i > 0 {
-                        writeln!(f, ", ")?;
-                    }
-                    write!(f, "{:?}", control)?;
-                }
-                write!(f, "\n}}")
+                fmt_indented(f, controls, 1)
             }
             ParsedToken::Array(array) => {
                 writeln!(f, "[")?;
                 for (i, item) in array.iter().enumerate() {
                     if i > 0 {
-                        write!(f, ", ")?;
+                        writeln!(f, ",")?;
                     }
                     write!(f, "{:?}", item)?;
                 }
-                write!(f, "\n]")
+                writeln!(f, "\n]")
             }
             ParsedToken::String(s) => write!(f, "\"{}\"", s),
             ParsedToken::Number(n) => write!(f, "{}", n),
@@ -198,8 +194,17 @@ impl<'a> CompleteContext<'a> {
     }
 }
 
-/// `PathInfo` is used to record the path information of nodes within the built AST.
-/// it shows the layer of the current `Value`
+/// A structure to track the path hierarchy of each `Value` in an AST (Abstract Syntax Tree).
+///
+/// The `PathInfo` structure uses a stack to calculate and store the index of
+/// each value within the AST. The stack helps in maintaining the path traversal.
+///
+/// # Fields
+/// - `stack`: A `RefCell` containing a `VecDeque` of `usize`, which represents
+///   the stack of index encountered during AST traversal. The stack allows pushing
+///   and popping index as you traverse deeper or move back in the tree.
+/// - `current`: A `RefCell` containing a `usize` that stores the current `Value` index
+///   in the AST.
 struct PathInfo {
     stack: RefCell<VecDeque<usize>>,
     current: RefCell<usize>,
@@ -213,10 +218,29 @@ impl PathInfo {
         }
     }
 
-    /// Gets the current node path.  
-    /// The method will automatically increment the index to the next one.  
-    fn get_path(&self) -> Vec<usize> {
-        let stack = self.stack.borrow_mut();
+    /// Returns the index path of the current `Value` in the AST (Abstract Syntax Tree).
+    ///
+    /// The AST is represented as a nested array, and this function provides a way to track
+    /// the exact location of the current `Value` in this tree structure by returning an
+    /// array of indices. Each index in the returned array corresponds to the position of
+    /// the `Value` in each level of the tree.
+    ///
+    /// For example, given an AST structured as follows:
+    ///
+    /// ```
+    /// [
+    ///   [
+    ///     [1, 2, 3],
+    ///     [4, 5]
+    ///   ],
+    ///   [6, 7]
+    /// ]
+    /// ```
+    ///
+    /// If the current `Value` is `5`, the function would return `[0, 1, 1]`
+    ///
+    fn gen_path(&self) -> Vec<usize> {
+        let stack = self.stack.borrow();
         let mut current = self.current.borrow_mut();
         if !stack.is_empty() {
             let mut result: Vec<usize> = Vec::with_capacity(stack.len() + 1);
@@ -232,21 +256,18 @@ impl PathInfo {
         }
     }
 
-    /// back an index from path stack  
-    /// then reset the current index  
-    fn back_path(&self, back_index: usize) {
-        let mut current = self.current.borrow_mut();
-        let mut stack = self.stack.borrow_mut();
-        *current = back_index;
-        stack.pop_back();
+    /// Exits the current subtree and restores the current index from the `back_index`
+    fn pop(&self, back_index: usize) {
+        *self.current.borrow_mut() = back_index;
+        self.stack.borrow_mut().pop_back();
     }
 
-    /// Gets the current node path  
-    /// push the currently index to path stack  
-    /// then clear the current index  
-    fn push_path(&self) -> Vec<usize> {
+    /// This function is used to signify traversal deeper into the AST, where a new index of nesting
+    /// is entered. The current index is pushed onto the stack, and the `current` index is reset to `0`
+    /// to represent the start of a new subtree.
+    fn push(&self) -> Vec<usize> {
         let index_value = { *self.current.borrow_mut() };
-        let path = self.get_path();
+        let path = self.gen_path();
         let mut current = self.current.borrow_mut();
         let mut stack = self.stack.borrow_mut();
         *current = 0;
@@ -490,7 +511,6 @@ impl Completer {
             let path_info: &PathInfo = &PathInfo::new();
 
             // trace!("{:?}",splice_control);
-
             for (index, c) in iter {
                 let i = index + l;
                 let str = c.as_ref();
@@ -500,14 +520,14 @@ impl Completer {
                         l: i,
                         r: 0,
                         type_id: TYPE_CR,
-                        path: path_info.push_path(),
+                        path: path_info.push(),
                         v: None,
                     }),
                     Token::LeftBracket if Self::not_quote_state(&stack) => stack.push_back(Value {
                         l: i,
                         r: 0,
                         type_id: TYPE_ARR,
-                        path: path_info.push_path(),
+                        path: path_info.push(),
                         v: None,
                     }),
                     Token::Colon if Self::not_quote_state(&stack) => {
@@ -515,7 +535,7 @@ impl Completer {
                             l: i,
                             r: i + 1,
                             type_id: TYPE_COL,
-                            path: path_info.get_path(),
+                            path: path_info.gen_path(),
                             v: Some(ParsedToken::Colon),
                         });
                     }
@@ -596,7 +616,7 @@ impl Completer {
                 l: value.l,
                 r: index + 1,
                 type_id: TYPE_STR,
-                path: path_info.get_path(),
+                path: path_info.gen_path(),
                 v: Some(ParsedToken::String(Arc::from(str_builder.clone()))),
             });
             str_builder.clear();
@@ -608,7 +628,7 @@ impl Completer {
         while let Some(f) = stack.pop_back() {
             if TYPE_CR == f.type_id && f.v.is_none() {
                 tmp_vec.reverse();
-                path_info.back_path(f.path.last().unwrap() + 1);
+                path_info.pop(f.path.last().unwrap() + 1);
                 stack.push_back(Value {
                     l: f.l,
                     r: index + 1,
@@ -634,7 +654,7 @@ impl Completer {
         while let Some(f) = stack.pop_back() {
             if TYPE_ARR == f.type_id && f.v.is_none() {
                 tmp_vec.reverse();
-                path_info.back_path(f.path.last().unwrap() + 1);
+                path_info.pop(f.path.last().unwrap() + 1);
                 stack.push_back(Value {
                     l: f.l,
                     r: index + 1,
@@ -661,7 +681,7 @@ impl Completer {
             l: index,
             r: index + 1,
             type_id: TYPE_COM,
-            path: path_info.get_path(),
+            path: path_info.gen_path(),
             v: Some(ParsedToken::Comma),
         });
     }
@@ -680,7 +700,7 @@ impl Completer {
                     l: index,
                     r: index + str_c + 1,
                     type_id: TYPE_BOL,
-                    path: path_info.get_path(),
+                    path: path_info.gen_path(),
                     v: Some(ParsedToken::Bool(boolean)),
                 });
             } else if let Ok(float) = str_builder.parse::<f32>() {
@@ -688,7 +708,7 @@ impl Completer {
                     l: index,
                     r: index + str_c + 1,
                     type_id: TYPE_NUM,
-                    path: path_info.get_path(),
+                    path: path_info.gen_path(),
                     v: Some(ParsedToken::Number(float)),
                 });
             }

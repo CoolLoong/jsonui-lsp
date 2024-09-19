@@ -1,5 +1,5 @@
 use crate::completion::{
-    CompleteContext, ParsedToken, Value, TYPE_ARR, TYPE_COL, TYPE_COM, TYPE_CR,
+    CompleteContext, ParsedToken, Value, TYPE_ARR, TYPE_COL, TYPE_COM, TYPE_CR, TYPE_STR,
 };
 use log::trace;
 use std::collections::HashMap;
@@ -66,6 +66,7 @@ pub(crate) async fn create_completion<'a>(
         context,
         ast
     );
+
     let type_c = context.control_type.lock().await;
     let nodes = context.nodes.lock().await;
     let input_c = context.input_char.lock().await;
@@ -73,6 +74,7 @@ pub(crate) async fn create_completion<'a>(
     let n1 = nodes[0];
     let n2 = nodes[1];
     let current = nodes[2];
+
     if let Some(first_ast_v) = ast.first()
         && let Some(ParsedToken::String(control_name)) = &first_ast_v.v
     {
@@ -92,48 +94,48 @@ pub(crate) async fn create_completion<'a>(
                         define_map,
                     );
                 } else if let Some(current_v) = current
-                    && let Some(nv2) = n2
                     && input_c.as_ref() == "\""
-                    && (current_v.type_id == TYPE_ARR
-                        || (nv2.type_id == TYPE_COM && current_v.type_id == TYPE_CR))
+                    && (current_v.path.len() == 3
+                        || current_v.type_id == TYPE_ARR
+                        || current_v.type_id == TYPE_CR)
                 {
                     trace!("create_bindings_type_completion");
                     let inputs = &create_binding_type_input(ast, define_map, current_v);
                     return create_type_completion(inputs, param, lang, define_map);
                 }
             }
-            CONTROLS => {
-                return None;
-            }
-            _ => {}
-        }
-    }
+            _ => {
+                if let Some(nv1) = n1
+                    && let Some(ParsedToken::String(pn)) = &nv1.v
+                    && let Some(nv2) = n2
+                    && nv2.type_id == TYPE_COL
+                    && (current.is_none() || current.unwrap().type_id != TYPE_CR)
+                {
+                    trace!("create_value_completion");
+                    return create_value_completion(
+                        input_c.as_ref(),
+                        pn.as_ref(),
+                        lang,
+                        define_map,
+                    );
+                } else if input_c.as_ref() == "\""
+                    && let Some(current_v) = current
+                    && (current_v.path.len() == 2 || current_v.type_id == TYPE_CR)
+                {
+                    trace!("create_type_completion");
+                    let mut inputs: Vec<&serde_json::Value> = vec![];
 
-    if let Some(nv1) = n1
-        && let Some(ParsedToken::String(pn)) = &nv1.v
-        && let Some(nv2) = n2
-        && nv2.type_id == TYPE_COL
-        && (current.is_none() || current.unwrap().type_id != TYPE_CR)
-    {
-        trace!("create_value_completion");
-        return create_value_completion(input_c.as_ref(), pn.as_ref(), lang, define_map);
-    } else if input_c.as_ref() == "\""
-        && let Some(current_v) = current
-        && (current_v.path.len() == 2 || current_v.type_id == TYPE_CR)
-    {
-        trace!("create_type_completion");
-        let mut inputs: Vec<&serde_json::Value> = vec![];
-        //fill type property
-        if let Some(c_type) = type_c.as_ref()
-            && let Some(serde_json::Value::Array(arr)) = define_map.get(c_type.as_ref())
-        {
-            inputs.extend(arr.iter());
+                    if let Some(c_type) = type_c.as_ref() //fill type property
+                        && let Some(serde_json::Value::Array(arr)) = define_map.get(c_type.as_ref())
+                    {
+                        inputs.extend(arr.iter());
+                    }
+                    inputs
+                        .extend(&mut define_map.get("common").unwrap().as_array().unwrap().iter()); //fill common property
+                    return create_type_completion(&inputs, param, lang, define_map);
+                }
+            }
         }
-        inputs.extend(
-            //fill common property
-            &mut define_map.get("common").unwrap().as_array().unwrap().iter(),
-        );
-        return create_type_completion(&inputs, param, lang, define_map);
     }
     None
 }
