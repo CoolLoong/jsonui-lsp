@@ -4,6 +4,8 @@
 client/**
 node_modules
 out
+resources
+.idea
 src
 target
 test

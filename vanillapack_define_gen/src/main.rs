@@ -9,7 +9,7 @@ use std::path::Path;
 use std::rc::Rc;
 use walkdir::WalkDir;
 
-const VERSION: &str = "1.21.20.3";
+const VERSION: &str = "1.21.30.3";
 
 fn main() -> io::Result<()> {
     let namespace_map: Rc<RefCell<HashMap<String, Value>>> = Rc::new(RefCell::new(HashMap::new()));
@@ -46,7 +46,7 @@ fn main() -> io::Result<()> {
         result.insert(k.clone(), type_map);
     }
 
-    let output_path = format!("out/vanillapack_define_{}.json", VERSION);
+    let output_path = format!("resources/vanillapack_define_{}.json", VERSION);
     let output_dir = Path::new(output_path.as_str()).parent().unwrap();
     if !output_dir.exists() {
         fs::create_dir_all(output_dir)?;

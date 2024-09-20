@@ -20,8 +20,8 @@ mod completion;
 mod completion_helper;
 mod document;
 
-const VANILLAPACK_DEFINE: &str = include_str!("../out/vanillapack_define_1.21.20.3.json");
-const JSONUI_DEFINE: &str = include_str!("../out/jsonui_define.json");
+const VANILLAPACK_DEFINE: &str = include_str!("../resources/vanillapack_define_1.21.30.3.json");
+const JSONUI_DEFINE: &str = include_str!("../resources/jsonui_define.json");
 const SEED: u64 = 32;
 
 struct Backend {

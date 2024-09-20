@@ -6,3 +6,4 @@ dist/
 *.vsix
 pnpm-lock.yaml
 Cargo.lock
+.idea
