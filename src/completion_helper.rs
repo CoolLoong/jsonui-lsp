@@ -1,12 +1,12 @@
-use crate::completion::{
-    CompleteContext, ParsedToken, Value, TYPE_ARR, TYPE_COL, TYPE_COM, TYPE_CR, TYPE_STR,
-};
-use log::trace;
 use std::collections::HashMap;
+
+use log::trace;
 use tower_lsp::lsp_types::{
     Color, CompletionItem, CompletionItemKind, CompletionItemLabelDetails, CompletionParams,
     InsertTextFormat, Position, Range, TextEdit,
 };
+
+use crate::completion::{CompleteContext, ParsedToken, Value, TYPE_ARR, TYPE_COL, TYPE_CR};
 
 const BINDINGS: &str = "bindings";
 const CONTROLS: &str = "controls";
@@ -61,11 +61,7 @@ pub(crate) async fn create_completion<'a>(
     context: &CompleteContext<'a>,
     ast: &Vec<Value>,
 ) -> Option<Vec<CompletionItem>> {
-    trace!(
-        "{:?}\n\n AST {:?}\n--------------------------------",
-        context,
-        ast
-    );
+    trace!("{:?}\n\n AST {:?}\n--------------------------------", context, ast);
 
     let type_c = context.control_type.lock().await;
     let nodes = context.nodes.lock().await;
@@ -87,12 +83,7 @@ pub(crate) async fn create_completion<'a>(
                     && (current.is_none() || current.unwrap().type_id != TYPE_ARR)
                 {
                     trace!("create_bindings_value_completion");
-                    return create_value_completion(
-                        input_c.as_ref(),
-                        pn.as_ref(),
-                        lang,
-                        define_map,
-                    );
+                    return create_value_completion(input_c.as_ref(), pn.as_ref(), lang, define_map);
                 } else if let Some(current_v) = current
                     && input_c.as_ref() == "\""
                     && (current_v.path.len() == 3
@@ -112,12 +103,7 @@ pub(crate) async fn create_completion<'a>(
                     && (current.is_none() || current.unwrap().type_id != TYPE_CR)
                 {
                     trace!("create_value_completion");
-                    return create_value_completion(
-                        input_c.as_ref(),
-                        pn.as_ref(),
-                        lang,
-                        define_map,
-                    );
+                    return create_value_completion(input_c.as_ref(), pn.as_ref(), lang, define_map);
                 } else if input_c.as_ref() == "\""
                     && let Some(current_v) = current
                     && (current_v.path.len() == 2 || current_v.type_id == TYPE_CR)
@@ -130,8 +116,7 @@ pub(crate) async fn create_completion<'a>(
                     {
                         inputs.extend(arr.iter());
                     }
-                    inputs
-                        .extend(&mut define_map.get("common").unwrap().as_array().unwrap().iter()); //fill common property
+                    inputs.extend(&mut define_map.get("common").unwrap().as_array().unwrap().iter()); // fill common property
                     return create_type_completion(&inputs, param, lang, define_map);
                 }
             }
@@ -162,13 +147,13 @@ fn create_type_completion(
                     }),
                     kind: Some(CompletionItemKind::TEXT),
                     text_edit: Some(tower_lsp::lsp_types::CompletionTextEdit::Edit(TextEdit {
-                        range: Range {
+                        range:    Range {
                             start: Position {
-                                line: param.text_document_position.position.line,
+                                line:      param.text_document_position.position.line,
                                 character: param.text_document_position.position.character,
                             },
-                            end: Position {
-                                line: param.text_document_position.position.line,
+                            end:   Position {
+                                line:      param.text_document_position.position.line,
                                 character: param.text_document_position.position.character + 1,
                             },
                         },
@@ -218,7 +203,7 @@ fn create_value_completion(
                             .or(d.get("en-us"))
                             .and_then(|f| f.as_str().map(|ff| ff.to_string()))
                     }),
-                    detail: None,
+                    detail:      None,
                 }),
                 kind: value
                     .get("kind")
@@ -251,81 +236,81 @@ pub(crate) fn from_color_value_to_color_arr(v: &Value) -> Option<Color> {
     if let Some(ParsedToken::String(color_str)) = &v.v {
         return match color_str.as_ref() {
             "white" => Some(Color {
-                red: 1.0,
+                red:   1.0,
                 green: 1.0,
-                blue: 1.0,
+                blue:  1.0,
                 alpha: 1.0,
             }),
             "silver" => Some(Color {
-                red: 0.776,
+                red:   0.776,
                 green: 0.776,
-                blue: 0.776,
+                blue:  0.776,
                 alpha: 1.0,
             }),
             "gray grey" => Some(Color {
-                red: 0.333,
+                red:   0.333,
                 green: 0.333,
-                blue: 0.333,
+                blue:  0.333,
                 alpha: 1.0,
             }),
             "black" => Some(Color {
-                red: 0.0,
+                red:   0.0,
                 green: 0.0,
-                blue: 0.0,
+                blue:  0.0,
                 alpha: 1.0,
             }),
             "red" => Some(Color {
-                red: 1.0,
+                red:   1.0,
                 green: 0.333,
-                blue: 0.333,
+                blue:  0.333,
                 alpha: 1.0,
             }),
             "green" => Some(Color {
-                red: 0.333,
+                red:   0.333,
                 green: 1.0,
-                blue: 0.333,
+                blue:  0.333,
                 alpha: 1.0,
             }),
             "yellow" => Some(Color {
-                red: 1.0,
+                red:   1.0,
                 green: 1.0,
-                blue: 0.333,
+                blue:  0.333,
                 alpha: 1.0,
             }),
             "brown" => Some(Color {
-                red: 0.706,
+                red:   0.706,
                 green: 0.408,
-                blue: 0.302,
+                blue:  0.302,
                 alpha: 1.0,
             }),
             "cyan" => Some(Color {
-                red: 0.0,
+                red:   0.0,
                 green: 0.667,
-                blue: 0.667,
+                blue:  0.667,
                 alpha: 1.0,
             }),
             "blue" => Some(Color {
-                red: 0.333,
+                red:   0.333,
                 green: 0.333,
-                blue: 1.0,
+                blue:  1.0,
                 alpha: 1.0,
             }),
             "orange" => Some(Color {
-                red: 1.0,
+                red:   1.0,
                 green: 0.667,
-                blue: 0.0,
+                blue:  0.0,
                 alpha: 1.0,
             }),
             "purple" => Some(Color {
-                red: 1.0,
+                red:   1.0,
                 green: 0.333,
-                blue: 1.0,
+                blue:  1.0,
                 alpha: 1.0,
             }),
             "nil" => Some(Color {
-                red: 1.0,
+                red:   1.0,
                 green: 1.0,
-                blue: 1.0,
+                blue:  1.0,
                 alpha: 0.0,
             }),
             _ => None,
@@ -348,16 +333,16 @@ pub(crate) fn from_color_value_to_color_arr(v: &Value) -> Option<Color> {
                 && v4 <= 1.0
             {
                 return Some(Color {
-                    red: v1,
+                    red:   v1,
                     green: v2,
-                    blue: v3,
+                    blue:  v3,
                     alpha: v4,
                 });
             } else {
                 return Some(Color {
-                    red: v1,
+                    red:   v1,
                     green: v2,
-                    blue: v3,
+                    blue:  v3,
                     alpha: 1.0,
                 });
             }

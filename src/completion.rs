@@ -4,7 +4,7 @@ use std::fmt::{self};
 use std::sync::Arc;
 use std::vec;
 
-use log::{debug, trace};
+use log::trace;
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{
     ColorInformation, CompletionItem, CompletionParams, DidChangeTextDocumentParams, Position, Range,

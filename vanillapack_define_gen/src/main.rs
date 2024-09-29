@@ -1,5 +1,3 @@
-use jsonc_parser::parse_to_serde_value;
-use serde_json::Value;
 use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -7,6 +5,9 @@ use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::Path;
 use std::rc::Rc;
+
+use jsonc_parser::parse_to_serde_value;
+use serde_json::Value;
 use walkdir::WalkDir;
 
 const VERSION: &str = "1.21.30.3";
@@ -39,7 +40,7 @@ fn main() -> io::Result<()> {
         }
     }
 
-    let map: &RefCell<HashMap<String, Value>>  = namespace_map.borrow();
+    let map: &RefCell<HashMap<String, Value>> = namespace_map.borrow();
     for (k, v) in map.borrow().iter() {
         let mut type_map: HashMap<String, String> = HashMap::new();
         process_properties(None, &v, &mut type_map, &map.borrow());
@@ -110,10 +111,7 @@ fn process_properties(
                 }
             }
         } else if key == "type" {
-            type_map.insert(
-                name.unwrap_or(sp[0]).to_string(),
-                value.as_str().unwrap().to_string(),
-            );
+            type_map.insert(name.unwrap_or(sp[0]).to_string(), value.as_str().unwrap().to_string());
         }
     }
 }
