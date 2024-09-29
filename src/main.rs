@@ -1,15 +1,16 @@
 #![feature(let_chains)]
 
-use completion::Completer;
-use flexi_logger::{LogSpecification, Logger, LoggerHandle};
-use jsonc_parser::{parse_to_serde_value, ParseOptions};
-use log::{set_max_level, trace};
-use serde_json::{json, Map, Value};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+
+use completion::Completer;
+use flexi_logger::{LogSpecification, Logger, LoggerHandle};
+use jsonc_parser::{parse_to_serde_value, ParseOptions};
+use log::{set_max_level, trace};
+use serde_json::{json, Map, Value};
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
 use tower_lsp::lsp_types::*;
@@ -25,15 +26,15 @@ const JSONUI_DEFINE: &str = include_str!("../resources/jsonui_define.json");
 const SEED: u64 = 32;
 
 struct Backend {
-    client: Client,
-    log: Arc<LoggerHandle>,
-    completers: Mutex<HashMap<u64, Completer>>,
+    client:             Client,
+    log:                Arc<LoggerHandle>,
+    completers:         Mutex<HashMap<u64, Completer>>,
     /// cache namespace -> control_name -> control_type
-    cache_type_map: Mutex<HashMap<String, HashMap<String, String>>>,
-    jsonui_define_map: HashMap<String, Value>,
+    cache_type_map:     Mutex<HashMap<String, HashMap<String, String>>>,
+    jsonui_define_map:  HashMap<String, Value>,
     /// cache url -> namespace
     id_2_namespace_map: Mutex<HashMap<u64, Arc<str>>>,
-    lang: Mutex<Arc<str>>,
+    lang:               Mutex<Arc<str>>,
 }
 
 fn extract_prefix(input: &str) -> &str {
@@ -114,14 +115,16 @@ impl LanguageServer for Backend {
         trace!("client lang is {}", json!(client_lang));
         *self.lang.lock().await = Arc::from(client_lang.as_str().unwrap());
 
-        if let Some(root_url) = param.root_uri && let Ok(workspace) = root_url.to_file_path(){
+        if let Some(root_url) = param.root_uri
+            && let Ok(workspace) = root_url.to_file_path()
+        {
             self.init_workspace(workspace).await;
         }
 
         let file_operation_filters = vec![FileOperationFilter {
-            scheme: Some("file".to_string()),
+            scheme:  Some("file".to_string()),
             pattern: FileOperationPattern {
-                glob: "**/*.json".to_string(),
+                glob:    "**/*.json".to_string(),
                 matches: None,
                 options: None,
             },
@@ -130,21 +133,21 @@ impl LanguageServer for Backend {
             filters: file_operation_filters,
         };
         Ok(InitializeResult {
-            server_info: Some(ServerInfo {
-                name: "jsonui support".to_string(),
+            server_info:     Some(ServerInfo {
+                name:    "jsonui support".to_string(),
                 version: None,
             }),
             offset_encoding: None,
-            capabilities: ServerCapabilities {
+            capabilities:    ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::INCREMENTAL,
                 )),
                 completion_provider: Some(CompletionOptions {
-                    resolve_provider: Some(false),
-                    trigger_characters: Some(vec!["\"".to_string(), ":".to_string()]),
+                    resolve_provider:           Some(false),
+                    trigger_characters:         Some(vec!["\"".to_string(), ":".to_string()]),
                     work_done_progress_options: Default::default(),
-                    all_commit_characters: None,
-                    completion_item: Some(CompletionOptionsCompletionItem {
+                    all_commit_characters:      None,
+                    completion_item:            Some(CompletionOptionsCompletionItem {
                         label_details_support: Some(true),
                     }),
                 }),
@@ -152,15 +155,15 @@ impl LanguageServer for Backend {
                 references_provider: None,
                 workspace: Some(WorkspaceServerCapabilities {
                     workspace_folders: Some(WorkspaceFoldersServerCapabilities {
-                        supported: Some(true),
+                        supported:            Some(true),
                         change_notifications: Some(OneOf::Left(true)),
                     }),
-                    file_operations: Some(WorkspaceFileOperationsServerCapabilities {
-                        did_create: Some(registration_options.clone()),
+                    file_operations:   Some(WorkspaceFileOperationsServerCapabilities {
+                        did_create:  Some(registration_options.clone()),
                         will_create: None,
-                        did_rename: Some(registration_options.clone()),
+                        did_rename:  Some(registration_options.clone()),
                         will_rename: None,
-                        did_delete: Some(registration_options.clone()),
+                        did_delete:  Some(registration_options.clone()),
                         will_delete: None,
                     }),
                 }),
@@ -168,10 +171,10 @@ impl LanguageServer for Backend {
                     StaticTextDocumentColorProviderOptions {
                         document_selector: Some(vec![DocumentFilter {
                             language: Some("json".to_string()),
-                            scheme: None,
-                            pattern: None,
+                            scheme:   None,
+                            pattern:  None,
                         }]),
-                        id: None,
+                        id:                None,
                     },
                 )),
                 ..ServerCapabilities::default()
@@ -197,13 +200,13 @@ impl LanguageServer for Backend {
         &self,
         params: ColorPresentationParams,
     ) -> Result<Vec<ColorPresentation>> {
-        let ColorPresentationParams { color, range,.. } = params;
+        let ColorPresentationParams { color, range, .. } = params;
         let color_presentation = ColorPresentation {
-            label: format!(
+            label:                 format!(
                 "rgba({:.3}, {:.3}, {:.3}, {:.3})",
                 color.red, color.green, color.blue, color.alpha
             ),
-            text_edit: Some(TextEdit {
+            text_edit:             Some(TextEdit {
                 range,
                 new_text: format!(
                     "[{:.3}, {:.3}, {:.3}, {:.3}]",
@@ -217,9 +220,7 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        self.client
-            .log_message(MessageType::INFO, "initialized!")
-            .await;
+        self.client.log_message(MessageType::INFO, "initialized!").await;
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -230,24 +231,6 @@ impl LanguageServer for Backend {
         m2.clear();
         m3.clear();
         Ok(())
-    }
-
-    /// do insert namespace and completers for open file
-    async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        if params.text_document.language_id != "json" {
-            return;
-        }
-
-        let content: String = params.text_document.text.as_str().chars().collect();
-        let arc_content: Arc<str> = Arc::from(content);
-
-        let url = &params.text_document.uri;
-        if let Ok(()) = self.insert_namespace_by_content(url, &arc_content).await {
-            let mut cmp_map = self.completers.lock().await;
-            let hash_value = hash_uri(url);
-            let new_cmp = Completer::from(arc_content);
-            cmp_map.entry(hash_value).or_insert(new_cmp);
-        }
     }
 
     // trigger in file change
@@ -305,9 +288,28 @@ impl LanguageServer for Backend {
         }
     }
 
+    /// do insert namespace and completers for open file
+    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        if params.text_document.language_id != "json" {
+            return;
+        }
+        trace!("open {}", json!(params.text_document.uri));
+        let content: String = params.text_document.text.as_str().chars().collect();
+        let arc_content: Arc<str> = Arc::from(content);
+
+        let url = &params.text_document.uri;
+        if let Ok(()) = self.insert_namespace_by_content(url, &arc_content).await {
+            let mut cmp_map = self.completers.lock().await;
+            let hash_value = hash_uri(url);
+            let new_cmp = Completer::from(arc_content);
+            cmp_map.entry(hash_value).or_insert(new_cmp);
+        }
+    }
+
     /// do clean completer for close file
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let url = &params.text_document.uri;
+        trace!("close {}", json!(url));
         let hash_value = hash_uri(url);
 
         let mut cmp_map = self.completers.lock().await;
@@ -333,9 +335,9 @@ impl Backend {
     fn namespace_not_find_error(&self, path: &str) -> Error {
         let e: ErrorCode = ErrorCode::ServerError(-35001);
         Error {
-            code: e,
+            code:    e,
             message: Cow::Owned(format!("cant find namespace from {}", path)),
-            data: None,
+            data:    None,
         }
     }
 
@@ -353,9 +355,7 @@ impl Backend {
                     parse_to_serde_value(&content, &ParseOptions::default())
                 {
                     if let Some(Value::String(namespace)) = obj.get("namespace") {
-                        tmp_content_cache
-                            .entry(namespace.to_string())
-                            .or_insert(obj);
+                        tmp_content_cache.entry(namespace.to_string()).or_insert(obj);
                     }
                 }
             }
@@ -421,10 +421,8 @@ impl Backend {
                     parse_to_serde_value(&content, &ParseOptions::default())
                 {
                     if let Some(Value::String(namespace)) = obj.get("namespace") {
-                        self.insert_namespace(url, Arc::from(namespace.as_str()))
-                            .await;
-                        self.process_workspace_file(None, namespace, None, &obj)
-                            .await;
+                        self.insert_namespace(url, Arc::from(namespace.as_str())).await;
+                        self.process_workspace_file(None, namespace, None, &obj).await;
                     }
                 }
             }
@@ -448,12 +446,8 @@ impl Backend {
 
             if let Some(type_value) = value.get("type").and_then(Value::as_str) {
                 let control_name = control_name.unwrap_or(prefix.unwrap());
-                self.insert_control_type(
-                    namespace,
-                    control_name.to_string(),
-                    type_value.to_string(),
-                )
-                .await;
+                self.insert_control_type(namespace, control_name.to_string(), type_value.to_string())
+                    .await;
             } else if let Some(suffix) = suffix {
                 let mut parts: Vec<&str> = suffix.split('.').collect();
                 if parts.len() == 1 {
@@ -525,10 +519,7 @@ async fn main() {
                 .unwrap() // Handle None similarly for nested map
                 .into_iter()
                 .map(|(inner_key, inner_value)| {
-                    (
-                        inner_key.to_string(),
-                        inner_value.as_str().unwrap_or_default().to_string(),
-                    )
+                    (inner_key.to_string(), inner_value.as_str().unwrap_or_default().to_string())
                 })
                 .collect();
             (key.to_string(), inner_map)
@@ -536,10 +527,7 @@ async fn main() {
         .collect();
 
     let jsonui_define: Value = serde_json::from_str(JSONUI_DEFINE).unwrap();
-    let obj = jsonui_define
-        .as_object()
-        .ok_or("Expected a JSON object")
-        .unwrap();
+    let obj = jsonui_define.as_object().ok_or("Expected a JSON object").unwrap();
     let mut jsonui_define_map: HashMap<String, Value> = HashMap::new();
     for (key, value) in obj {
         jsonui_define_map.insert(key.to_string(), value.clone());

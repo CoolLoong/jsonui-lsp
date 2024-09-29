@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use log::trace;
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{DidChangeTextDocumentParams, Position};
 use unicode_segmentation::UnicodeSegmentation;
@@ -7,14 +8,14 @@ use unicode_segmentation::UnicodeSegmentation;
 #[derive(Debug)]
 pub struct Document {
     pub line_info_cache: Mutex<Vec<LineInfo>>,
-    pub content_cache: Mutex<String>,
-    pub content_chars: Mutex<Vec<Arc<str>>>,
+    pub content_cache:   Mutex<String>,
+    pub content_chars:   Mutex<Vec<Arc<str>>>,
 }
 
 #[derive(Debug)]
 pub struct LineInfo {
     pub start_index: usize,
-    pub char_count: usize,
+    pub char_count:  usize,
 }
 
 impl Document {
@@ -23,8 +24,8 @@ impl Document {
         let content_chars: Vec<Arc<str>> = content.graphemes(true).map(Arc::from).collect();
         Self {
             line_info_cache: Self::init_line_info_cache(str),
-            content_cache: Mutex::new(content),
-            content_chars: Mutex::new(content_chars),
+            content_cache:   Mutex::new(content),
+            content_chars:   Mutex::new(content_chars),
         }
     }
 
@@ -41,12 +42,7 @@ impl Document {
         }
     }
 
-    pub async fn replace_grapheme_range(
-        &self,
-        start_idx: usize,
-        end_idx: usize,
-        replacement: Arc<str>,
-    ) {
+    pub async fn replace_grapheme_range(&self, start_idx: usize, end_idx: usize, replacement: Arc<str>) {
         let mut chars = self.content_chars.lock().await;
         if start_idx > end_idx || start_idx > chars.len() || end_idx > chars.len() {
             panic!()
@@ -112,7 +108,7 @@ impl Document {
         let result = if line == 0 {
             index
         } else {
-            let mut result = line_cache[0..line] //get 0 ~ line-1
+            let mut result = line_cache[0..line] // get 0 ~ line-1
                 .iter()
                 .map(|info| info.char_count)
                 .sum::<usize>();
@@ -141,7 +137,7 @@ impl Document {
             if index < current_index + info.char_count {
                 let character = index - current_index;
                 return Some(Position {
-                    line: line_num as u32,
+                    line:      line_num as u32,
                     character: character as u32,
                 });
             }
@@ -174,6 +170,21 @@ impl Document {
         }
     }
 
+    fn handle_boundary_char<'a>(char: &'a str, boundary_stacks: &mut Vec<Vec<&'a str>>) {
+        let (current_index, opposite_index) = match char {
+            "{" => (0, 1),
+            "}" => (1, 0),
+            "[" => (2, 3),
+            "]" => (3, 2),
+            _ => unreachable!(),
+        };
+        if boundary_stacks[opposite_index].is_empty() {
+            boundary_stacks[current_index].push(char);
+        } else {
+            boundary_stacks[opposite_index].pop();
+        }
+    }
+
     pub async fn get_boundary_indices(&self, index: usize) -> Option<(usize, usize)> {
         let content = self.content_chars.lock().await;
         let (forward, backward) = content.split_at(index);
@@ -181,53 +192,19 @@ impl Document {
             return None;
         }
 
-        let mut boundary_char_stack1: Vec<&str> = Vec::new(); //for {}
-        let mut boundary_char_stack2: Vec<&str> = Vec::new(); //for []
-        let mut start_index: Option<usize> = None;
-        let mut end_index: Option<usize> = None;
-        let mut bound_state = true;
-        let f_len = forward.len();
+        let mut boundary_stacks = vec![vec![], vec![], vec![], vec![]];
+        let (mut start_index, mut end_index) = (None, None);
         let mut forward_iter = forward.iter().rev().peekable().enumerate();
 
+        let f_len = forward.len();
         while let Some((_, ch)) = forward_iter.next() {
             let char = ch.as_ref();
             match char {
-                "{" | "}" => {
-                    if !boundary_char_stack1.is_empty() {
-                        boundary_char_stack1.pop();
-                    } else {
-                        boundary_char_stack1.push(char);
-                    }
-                    bound_state = true;
-                }
-                "[" | "]" => {
-                    if !boundary_char_stack2.is_empty() {
-                        boundary_char_stack2.pop();
-                    } else {
-                        boundary_char_stack2.push(char);
-                    }
-                    bound_state = true;
-                }
+                "{" | "}" | "[" | "]" => Self::handle_boundary_char(char, &mut boundary_stacks),
                 ":" => {
-                    if !(boundary_char_stack1.len() == 1 || boundary_char_stack2.len() == 1) {
+                    if !(boundary_stacks[0].len() == 1 || boundary_stacks[2].len() == 1) {
                         continue;
                     }
-                    let mut p1 = boundary_char_stack1.iter().peekable();
-                    let mut p2 = boundary_char_stack2.iter().peekable();
-                    if let Some(&&v1) = p1.peek()
-                        && v1 != "{"
-                    {
-                        continue;
-                    }
-                    if let Some(&&v2) = p2.peek()
-                        && v2 != "["
-                    {
-                        continue;
-                    }
-                    if !bound_state {
-                        continue;
-                    }
-
                     let opt = forward_iter
                         .by_ref()
                         .skip_while(|(_, c)| c.as_ref() != "\"")
@@ -239,36 +216,19 @@ impl Document {
                         break;
                     }
                 }
-                _ if !matches!(char, " " | "\r\n" | "\n") => {
-                    bound_state &= false;
-                }
                 _ => {}
             }
         }
-
         let start_index_v = start_index?;
 
         let backend_iter = backward.iter().peekable().enumerate();
         for (index, ch) in backend_iter {
             let char = ch.as_ref();
             match char {
-                "{" | "}" => {
-                    if !boundary_char_stack1.is_empty() {
-                        boundary_char_stack1.pop();
-                    } else {
-                        boundary_char_stack1.push(char);
-                    }
-                }
-                "[" | "]" => {
-                    if !boundary_char_stack2.is_empty() {
-                        boundary_char_stack2.pop();
-                    } else {
-                        boundary_char_stack2.push(char);
-                    }
-                }
+                "{" | "}" | "[" | "]" => Self::handle_boundary_char(char, &mut boundary_stacks),
                 _ => {}
             }
-            if boundary_char_stack1.is_empty() && boundary_char_stack2.is_empty() {
+            if boundary_stacks.iter().all(|stack| stack.is_empty()) {
                 end_index = Some(index + f_len);
                 break;
             }
@@ -293,52 +253,52 @@ mod tests {
     async fn test_apply_change() {
         let document = Document::from(&EXAMPLE1.to_string());
         let request = DidChangeTextDocumentParams {
-            text_document: VersionedTextDocumentIdentifier {
-                uri: Url::parse("https://example.com").unwrap(),
+            text_document:   VersionedTextDocumentIdentifier {
+                uri:     Url::parse("https://example.com").unwrap(),
                 version: 1,
             },
             content_changes: vec![
                 TextDocumentContentChangeEvent {
-                    range: Some(Range {
+                    range:        Some(Range {
                         start: Position {
-                            line: 24,
+                            line:      24,
                             character: 30,
                         },
-                        end: Position {
-                            line: 24,
+                        end:   Position {
+                            line:      24,
                             character: 30,
                         },
                     }),
                     range_length: None,
-                    text: ",".to_string(),
+                    text:         ",".to_string(),
                 },
                 TextDocumentContentChangeEvent {
-                    range: Some(Range {
+                    range:        Some(Range {
                         start: Position {
-                            line: 24,
+                            line:      24,
                             character: 31,
                         },
-                        end: Position {
-                            line: 24,
+                        end:   Position {
+                            line:      24,
                             character: 31,
                         },
                     }),
                     range_length: None,
-                    text: "\n    ".to_string(),
+                    text:         "\n    ".to_string(),
                 },
                 TextDocumentContentChangeEvent {
-                    range: Some(Range {
+                    range:        Some(Range {
                         start: Position {
-                            line: 25,
+                            line:      25,
                             character: 4,
                         },
-                        end: Position {
-                            line: 25,
+                        end:   Position {
+                            line:      25,
                             character: 4,
                         },
                     }),
                     range_length: None,
-                    text: "\"\"".to_string(),
+                    text:         "\"\"".to_string(),
                 },
             ],
         };
@@ -356,23 +316,23 @@ mod tests {
     async fn test_apply_delete_change() {
         let document = Document::from(&EXAMPLE1.to_string());
         let request = DidChangeTextDocumentParams {
-            text_document: VersionedTextDocumentIdentifier {
-                uri: Url::parse("https://example.com").unwrap(),
+            text_document:   VersionedTextDocumentIdentifier {
+                uri:     Url::parse("https://example.com").unwrap(),
                 version: 1,
             },
             content_changes: vec![TextDocumentContentChangeEvent {
-                range: Some(Range {
+                range:        Some(Range {
                     start: Position {
-                        line: 23,
+                        line:      23,
                         character: 23,
                     },
-                    end: Position {
-                        line: 23,
+                    end:   Position {
+                        line:      23,
                         character: 27,
                     },
                 }),
                 range_length: None,
-                text: "".to_string(),
+                text:         "".to_string(),
             }],
         };
         document.apply_change(&request).await;
@@ -384,13 +344,9 @@ mod tests {
     #[tokio::test]
     async fn test_replace_grapheme_range() {
         let document = Document::from(&"hello 世界".to_string());
-        document
-            .replace_grapheme_range(5, 5, Arc::from("MMM"))
-            .await;
+        document.replace_grapheme_range(5, 5, Arc::from("MMM")).await;
         assert_eq!(*document.content_cache.lock().await, "helloMMM 世界");
-        document
-            .replace_grapheme_range(5, 8, Arc::from("XXX"))
-            .await;
+        document.replace_grapheme_range(5, 8, Arc::from("XXX")).await;
         assert_eq!(*document.content_cache.lock().await, "helloXXX 世界");
         document.replace_grapheme_range(8, 8, Arc::from("D")).await;
         assert_eq!(*document.content_cache.lock().await, "helloXXXD 世界");
@@ -401,7 +357,7 @@ mod tests {
         let document = Document::from(&EXAMPLE1.to_string());
         let v: usize = document
             .get_index_from_position(&Position {
-                line: 16,
+                line:      16,
                 character: 6,
             })
             .await
@@ -415,7 +371,7 @@ mod tests {
 
         let v = document
             .get_index_from_position(&Position {
-                line: 6,
+                line:      6,
                 character: 3,
             })
             .await

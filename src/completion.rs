@@ -1,32 +1,32 @@
-use crate::completion_helper::from_color_value_to_color_arr;
-use crate::Backend;
-use crate::{completion_helper::create_completion, document::Document};
+use std::cell::RefCell;
+use std::collections::VecDeque;
+use std::fmt::{self};
+use std::sync::Arc;
+use std::vec;
+
 use log::{debug, trace};
-use std::{
-    cell::RefCell,
-    collections::VecDeque,
-    fmt::{self},
-    sync::Arc,
-    vec,
-};
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{
-    ColorInformation, CompletionItem, CompletionParams, DidChangeTextDocumentParams, Position,
-    Range, Url,
+    ColorInformation, CompletionItem, CompletionParams, DidChangeTextDocumentParams, Position, Range,
+    Url,
 };
+
+use crate::completion_helper::{create_completion, from_color_value_to_color_arr};
+use crate::document::Document;
+use crate::Backend;
 
 /// Defines an enum named `Token` with variants representing different characters as
 /// their integer values. Each variant is assigned a character value casted to an `isize` type
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
-    LeftBrace = '{' as isize,
-    RightBrace = '}' as isize,
-    LeftBracket = '[' as isize,
+    LeftBrace    = '{' as isize,
+    RightBrace   = '}' as isize,
+    LeftBracket  = '[' as isize,
     RightBracket = ']' as isize,
-    Comma = ',' as isize,
-    Colon = ':' as isize,
-    Quote = '"' as isize,
-    OTHER = '🤪' as isize,
+    Comma        = ',' as isize,
+    Colon        = ':' as isize,
+    Quote        = '"' as isize,
+    OTHER        = '🤪' as isize,
 }
 
 pub const TYPE_CR: u8 = 2;
@@ -48,11 +48,11 @@ pub const TYPE_COM: u8 = 8;
 /// * `v`: parsed value
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Value {
-    pub(crate) l: usize,
-    pub(crate) r: usize,
+    pub(crate) l:       usize,
+    pub(crate) r:       usize,
     pub(crate) type_id: u8,
-    pub(crate) path: Vec<usize>,
-    pub(crate) v: Option<ParsedToken>,
+    pub(crate) path:    Vec<usize>,
+    pub(crate) v:       Option<ParsedToken>,
 }
 
 impl fmt::Debug for Value {
@@ -101,9 +101,7 @@ impl fmt::Debug for ParsedToken {
         }
 
         match self {
-            ParsedToken::Controls(controls) => {
-                fmt_indented(f, controls, 1)
-            }
+            ParsedToken::Controls(controls) => fmt_indented(f, controls, 1),
             ParsedToken::Array(array) => {
                 writeln!(f, "[")?;
                 for (i, item) in array.iter().enumerate() {
@@ -169,27 +167,28 @@ impl Token {
     }
 }
 
-/// `CompleteContext` is a struct used to describe contextual information at the completion position within vscode.
+/// `CompleteContext` is a struct used to describe contextual information at the completion position
+/// within vscode.
 #[derive(Debug)]
 pub(crate) struct CompleteContext<'a> {
     pub(crate) control_type: Mutex<Option<Arc<str>>>,
-    pub(crate) l: Mutex<usize>,
-    pub(crate) r: Mutex<usize>,
-    pub(crate) index: Mutex<usize>,
-    pub(crate) input_char: Mutex<Arc<str>>,
-    pub(crate) nodes: Mutex<Vec<Option<&'a Value>>>,
+    pub(crate) l:            Mutex<usize>,
+    pub(crate) r:            Mutex<usize>,
+    pub(crate) index:        Mutex<usize>,
+    pub(crate) input_char:   Mutex<Arc<str>>,
+    pub(crate) nodes:        Mutex<Vec<Option<&'a Value>>>,
 }
 
 impl<'a> CompleteContext<'a> {
     /// create an empty `CompleteContext`
-    pub fn empty() -> Self {
+    pub fn new() -> Self {
         CompleteContext {
             control_type: Mutex::new(None),
-            r: Mutex::new(0),
-            l: Mutex::new(0),
-            input_char: Mutex::new(Arc::from("")),
-            index: Mutex::new(0),
-            nodes: Mutex::new(vec![]),
+            r:            Mutex::new(0),
+            l:            Mutex::new(0),
+            input_char:   Mutex::new(Arc::from("")),
+            index:        Mutex::new(0),
+            nodes:        Mutex::new(vec![]),
         }
     }
 }
@@ -200,20 +199,19 @@ impl<'a> CompleteContext<'a> {
 /// each value within the AST. The stack helps in maintaining the path traversal.
 ///
 /// # Fields
-/// - `stack`: A `RefCell` containing a `VecDeque` of `usize`, which represents
-///   the stack of index encountered during AST traversal. The stack allows pushing
-///   and popping index as you traverse deeper or move back in the tree.
-/// - `current`: A `RefCell` containing a `usize` that stores the current `Value` index
-///   in the AST.
+/// - `stack`: A `RefCell` containing a `VecDeque` of `usize`, which represents the stack of index
+///   encountered during AST traversal. The stack allows pushing and popping index as you traverse deeper
+///   or move back in the tree.
+/// - `current`: A `RefCell` containing a `usize` that stores the current `Value` index in the AST.
 struct PathInfo {
-    stack: RefCell<VecDeque<usize>>,
+    stack:   RefCell<VecDeque<usize>>,
     current: RefCell<usize>,
 }
 
 impl PathInfo {
     fn new() -> Self {
         PathInfo {
-            stack: RefCell::new(VecDeque::new()),
+            stack:   RefCell::new(VecDeque::new()),
             current: RefCell::new(0),
         }
     }
@@ -228,17 +226,10 @@ impl PathInfo {
     /// For example, given an AST structured as follows:
     ///
     /// ```
-    /// [
-    ///   [
-    ///     [1, 2, 3],
-    ///     [4, 5]
-    ///   ],
-    ///   [6, 7]
-    /// ]
+    /// [[[1, 2, 3], [4, 5]], [6, 7]]
     /// ```
     ///
     /// If the current `Value` is `5`, the function would return `[0, 1, 1]`
-    ///
     fn gen_path(&self) -> Vec<usize> {
         let stack = self.stack.borrow();
         let mut current = self.current.borrow_mut();
@@ -287,14 +278,14 @@ impl PathInfo {
 /// data stored within the `Completer` struct.
 pub(crate) struct Completer {
     document: Document,
-    ast: Mutex<Option<Vec<Value>>>,
+    ast:      Mutex<Option<Vec<Value>>>,
 }
 
 impl Completer {
     pub fn from(str: Arc<str>) -> Self {
         Completer {
             document: Document::from(&str.to_string()),
-            ast: Mutex::new(None),
+            ast:      Mutex::new(None),
         }
     }
 
@@ -304,13 +295,13 @@ impl Completer {
         docs_url: &Url,
         context: &'a CompleteContext<'a>,
     ) {
-        //fill context from ast
+        // fill context from ast
         let mut result = Vec::new();
         Self::flatten_ast(ast, &mut result);
         let v_index = *context.index.lock().await;
         let node_index = result.iter().rposition(|value| value.r <= v_index);
 
-        //find the neighbors node corresponding to the current index
+        // find the neighbors node corresponding to the current index
         let mut neighbors: Vec<Option<&'a Value>> = Vec::with_capacity(5);
         if let Some(i) = node_index {
             let i = i as i32;
@@ -325,7 +316,7 @@ impl Completer {
         }
         *context.nodes.lock().await = neighbors;
 
-        //find control_type by context
+        // find control_type by context
         result.clear();
         Self::flatten_ast_one_layer(ast, &mut result);
         for (index, i) in result.iter().enumerate() {
@@ -392,9 +383,10 @@ impl Completer {
             *context.index.lock().await = index_v;
             index_value = index_v;
         } else {
+            trace!("cant get_index_from_position {:?}", pos);
             return;
         }
-        //write the input char currently
+        // write the input char currently
         {
             let input_char_index = index_value - 1;
             if let Some(cr) = self.document.get_char(input_char_index).await {
@@ -404,24 +396,14 @@ impl Completer {
         self.build_ast(index_value, context).await;
     }
 
-    pub async fn compelte(
-        &self,
-        bk: &Backend,
-        param: &CompletionParams,
-    ) -> Option<Vec<CompletionItem>> {
-        let context: CompleteContext = CompleteContext::empty();
+    pub async fn compelte(&self, bk: &Backend, param: &CompletionParams) -> Option<Vec<CompletionItem>> {
+        let context: CompleteContext = CompleteContext::new();
         self.update_ast(&context, &param.text_document_position.position)
             .await;
 
         let ast_lock = self.ast.lock().await;
         if let Some(ast) = ast_lock.as_ref() {
-            Self::fill_context(
-                bk,
-                ast,
-                &param.text_document_position.text_document.uri,
-                &context,
-            )
-            .await;
+            Self::fill_context(bk, ast, &param.text_document_position.text_document.uri, &context).await;
             let lang = bk.lang.lock().await;
             create_completion(lang.as_ref(), &bk.jsonui_define_map, param, &context, ast).await
         } else {
@@ -445,7 +427,7 @@ impl Completer {
             }
         };
         if let Some(pos_v) = pos {
-            let context: CompleteContext = CompleteContext::empty();
+            let context: CompleteContext = CompleteContext::new();
             self.update_ast(&context, &pos_v).await;
         } else {
             trace!("pos is null in complete_color");
@@ -475,7 +457,7 @@ impl Completer {
                     color_infos.push(ColorInformation {
                         range: Range {
                             start: left_v,
-                            end: right_v,
+                            end:   right_v,
                         },
                         color,
                     });
@@ -502,6 +484,7 @@ impl Completer {
 
     async fn build_ast<'a>(&self, index: usize, context: &'a CompleteContext<'a>) {
         let indices = self.document.get_boundary_indices(index).await;
+
         if let Some((l, r)) = indices {
             let chars = self.document.content_chars.lock().await;
             let splice_control = &chars[l..r + 1];
@@ -510,33 +493,33 @@ impl Completer {
             let iter = splice_control.iter().enumerate();
             let path_info: &PathInfo = &PathInfo::new();
 
-            // trace!("{:?}",splice_control);
+            // trace!("{:?}", splice_control);
             for (index, c) in iter {
                 let i = index + l;
                 let str = c.as_ref();
                 match str.into() {
                     Token::Quote => Self::handle_quote(&mut stack, &mut str_builder, i, path_info),
                     Token::LeftBrace if Self::not_quote_state(&stack) => stack.push_back(Value {
-                        l: i,
-                        r: 0,
+                        l:       i,
+                        r:       0,
                         type_id: TYPE_CR,
-                        path: path_info.push(),
-                        v: None,
+                        path:    path_info.push(),
+                        v:       None,
                     }),
                     Token::LeftBracket if Self::not_quote_state(&stack) => stack.push_back(Value {
-                        l: i,
-                        r: 0,
+                        l:       i,
+                        r:       0,
                         type_id: TYPE_ARR,
-                        path: path_info.push(),
-                        v: None,
+                        path:    path_info.push(),
+                        v:       None,
                     }),
                     Token::Colon if Self::not_quote_state(&stack) => {
                         stack.push_back(Value {
-                            l: i,
-                            r: i + 1,
+                            l:       i,
+                            r:       i + 1,
                             type_id: TYPE_COL,
-                            path: path_info.gen_path(),
-                            v: Some(ParsedToken::Colon),
+                            path:    path_info.gen_path(),
+                            v:       Some(ParsedToken::Colon),
                         });
                     }
                     Token::RightBrace if Self::not_quote_state(&stack) => {
@@ -554,6 +537,7 @@ impl Completer {
             }
             let ast_result: Vec<Value> = stack.into_iter().collect();
             *self.ast.lock().await = if ast_result.is_empty() {
+                trace!("build ast is none");
                 None
             } else {
                 Some(ast_result)
@@ -561,7 +545,7 @@ impl Completer {
             *context.l.lock().await = l;
             *context.r.lock().await = r;
         } else {
-            debug!("build ast error");
+            trace!("build ast error");
             *self.ast.lock().await = None;
         }
     }
@@ -600,24 +584,24 @@ impl Completer {
         path_info: &PathInfo,
     ) {
         if !stack.iter().any(|f| TYPE_STR == f.type_id && f.v.is_none()) {
-            str_builder.clear(); //remove potential comments
+            str_builder.clear(); // remove potential comments
             stack.push_back(Value {
-                l: index,
-                r: 0,
+                l:       index,
+                r:       0,
                 type_id: TYPE_STR,
-                path: vec![],
-                v: None,
+                path:    vec![],
+                v:       None,
             });
         } else if let Some(value) = stack.pop_back()
             && TYPE_STR == value.type_id
             && value.v.is_none()
         {
             stack.push_back(Value {
-                l: value.l,
-                r: index + 1,
+                l:       value.l,
+                r:       index + 1,
                 type_id: TYPE_STR,
-                path: path_info.gen_path(),
-                v: Some(ParsedToken::String(Arc::from(str_builder.clone()))),
+                path:    path_info.gen_path(),
+                v:       Some(ParsedToken::String(Arc::from(str_builder.clone()))),
             });
             str_builder.clear();
         }
@@ -630,11 +614,11 @@ impl Completer {
                 tmp_vec.reverse();
                 path_info.pop(f.path.last().unwrap() + 1);
                 stack.push_back(Value {
-                    l: f.l,
-                    r: index + 1,
+                    l:       f.l,
+                    r:       index + 1,
                     type_id: TYPE_CR,
-                    path: f.path,
-                    v: Some(ParsedToken::Controls(tmp_vec)),
+                    path:    f.path,
+                    v:       Some(ParsedToken::Controls(tmp_vec)),
                 });
                 return;
             } else {
@@ -656,11 +640,11 @@ impl Completer {
                 tmp_vec.reverse();
                 path_info.pop(f.path.last().unwrap() + 1);
                 stack.push_back(Value {
-                    l: f.l,
-                    r: index + 1,
+                    l:       f.l,
+                    r:       index + 1,
                     type_id: TYPE_ARR,
-                    path: f.path,
-                    v: Some(ParsedToken::Array(tmp_vec)),
+                    path:    f.path,
+                    v:       Some(ParsedToken::Array(tmp_vec)),
                 });
                 return;
             } else {
@@ -669,7 +653,8 @@ impl Completer {
         }
     }
 
-    /// The `handle_comma` function is represent comma grammar rule,it parses a string into a comma token and pushes to stack
+    /// The `handle_comma` function is represent comma grammar rule,it parses a string into a comma token
+    /// and pushes to stack
     fn handle_comma(
         stack: &mut VecDeque<Value>,
         str_builder: &mut String,
@@ -678,11 +663,11 @@ impl Completer {
     ) {
         Completer::collect_value(stack, str_builder, index, path_info);
         stack.push_back(Value {
-            l: index,
-            r: index + 1,
+            l:       index,
+            r:       index + 1,
             type_id: TYPE_COM,
-            path: path_info.gen_path(),
-            v: Some(ParsedToken::Comma),
+            path:    path_info.gen_path(),
+            v:       Some(ParsedToken::Comma),
         });
     }
 
@@ -697,19 +682,19 @@ impl Completer {
             let str_c = str_builder.len();
             if let Ok(boolean) = str_builder.parse::<bool>() {
                 stack.push_back(Value {
-                    l: index,
-                    r: index + str_c + 1,
+                    l:       index,
+                    r:       index + str_c + 1,
                     type_id: TYPE_BOL,
-                    path: path_info.gen_path(),
-                    v: Some(ParsedToken::Bool(boolean)),
+                    path:    path_info.gen_path(),
+                    v:       Some(ParsedToken::Bool(boolean)),
                 });
             } else if let Ok(float) = str_builder.parse::<f32>() {
                 stack.push_back(Value {
-                    l: index,
-                    r: index + str_c + 1,
+                    l:       index,
+                    r:       index + str_c + 1,
                     type_id: TYPE_NUM,
-                    path: path_info.gen_path(),
-                    v: Some(ParsedToken::Number(float)),
+                    path:    path_info.gen_path(),
+                    v:       Some(ParsedToken::Number(float)),
                 });
             }
             str_builder.clear();
@@ -731,7 +716,7 @@ mod tests {
         let index = completer
             .document
             .get_index_from_position(&Position {
-                line: 16,
+                line:      16,
                 character: 5,
             })
             .await;
@@ -742,7 +727,7 @@ mod tests {
         let result = completer
             .document
             .get_index_from_position(&Position {
-                line: 44,
+                line:      44,
                 character: 1,
             })
             .await;
@@ -752,12 +737,12 @@ mod tests {
     #[tokio::test]
     async fn test_build_ast() {
         let completer = Completer::from(EXAMPLE1.into());
-        let context = &CompleteContext::empty();
+        let context = &CompleteContext::new();
         completer
             .update_ast(
                 context,
                 &Position {
-                    line: 16,
+                    line:      16,
                     character: 5,
                 },
             )
@@ -768,12 +753,12 @@ mod tests {
         }
 
         let completer = Completer::from(EXAMPLE1.into());
-        let context = &CompleteContext::empty();
+        let context = &CompleteContext::new();
         completer
             .update_ast(
                 context,
                 &Position {
-                    line: 0,
+                    line:      0,
                     character: 1,
                 },
             )
