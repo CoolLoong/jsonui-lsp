@@ -531,7 +531,7 @@ impl Completer {
                     Token::Comma if Self::not_quote_state(&stack) => {
                         Self::handle_comma(&mut stack, &mut str_builder, i, path_info)
                     }
-                    _ if Token::is_ignore(str) => continue,
+                    _ if Self::not_quote_state(&stack) && Token::is_ignore(str) => continue,
                     _ => str_builder.push_str(str),
                 }
             }
