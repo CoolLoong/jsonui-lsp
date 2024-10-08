@@ -154,7 +154,6 @@ impl Completer {
             *context.r.lock().await = r;
         } else {
             *self.ast.lock().await = None;
-            return;
         }
     }
 

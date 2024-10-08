@@ -333,15 +333,12 @@ impl Parser {
             {
                 let v = &current.v;
                 let vv = v.as_ref().unwrap();
-                match vv {
-                    ParsedToken::String(s) => {
-                        let cur_str = s.to_string();
-                        if !self.keyword.contains(&cur_str) {
-                            let key = doc.namespace.clone() + "." + cur_str.as_ref();
-                            self.symbol_t.insert(key, (current.l, current.r));
-                        }
+                if let ParsedToken::String(s) = vv {
+                    let cur_str = s.to_string();
+                    if !self.keyword.contains(&cur_str) {
+                        let key = doc.namespace.clone() + "." + cur_str.as_ref();
+                        self.symbol_t.insert(key, (current.l, current.r));
                     }
-                    _ => {}
                 }
             }
         }

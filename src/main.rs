@@ -192,7 +192,7 @@ impl LanguageServer for Backend {
 
         let cmp_v = self.completers.get(&hash_value);
         if let Some(vv) = cmp_v {
-            if let Some(result) = vv.complete_color(&self).await {
+            if let Some(result) = vv.complete_color(self).await {
                 return Ok(result);
             }
         }
@@ -489,9 +489,9 @@ impl Backend {
     }
 }
 
-fn extract_keyword_from_json<'a>(
+fn extract_keyword_from_json(
     keys: &[&str],
-    json_map: &'a HashMap<String, Value>,
+    json_map: &HashMap<String, Value>,
 ) -> HashSet<String> {
     let mut keyword = HashSet::new();
     for key in keys {
