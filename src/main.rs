@@ -1,25 +1,28 @@
 #![feature(let_chains)]
 
+mod completion;
+mod completion_helper;
+mod document;
+mod parser;
+
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use completion::Completer;
+use dashmap::DashMap;
 use flexi_logger::{LogSpecification, Logger, LoggerHandle};
 use jsonc_parser::{parse_to_serde_value, ParseOptions};
 use log::{set_max_level, trace};
+use parser::Parser;
 use serde_json::{json, Map, Value};
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use walkdir::WalkDir;
-
-mod completion;
-mod completion_helper;
-mod document;
 
 const VANILLAPACK_DEFINE: &str = include_str!("../resources/vanillapack_define_1.21.30.3.json");
 const JSONUI_DEFINE: &str = include_str!("../resources/jsonui_define.json");
@@ -28,13 +31,14 @@ const SEED: u64 = 32;
 struct Backend {
     client:             Client,
     log:                Arc<LoggerHandle>,
-    completers:         Mutex<HashMap<u64, Completer>>,
+    completers:         DashMap<u64, Completer>,
     /// cache namespace -> control_name -> control_type
-    cache_type_map:     Mutex<HashMap<String, HashMap<String, String>>>,
+    cache_type_map:     DashMap<String, HashMap<String, String>>,
     jsonui_define_map:  HashMap<String, Value>,
     /// cache url -> namespace
-    id_2_namespace_map: Mutex<HashMap<u64, Arc<str>>>,
+    id_2_namespace_map: DashMap<u64, Arc<str>>,
     lang:               Mutex<Arc<str>>,
+    parser:             Parser,
 }
 
 fn extract_prefix(input: &str) -> &str {
@@ -44,7 +48,7 @@ fn extract_prefix(input: &str) -> &str {
     }
 }
 
-fn get_namespace(s: &Arc<str>) -> Option<String> {
+fn get_namespace(s: Arc<str>) -> Option<String> {
     const NAMESPACE: &str = "namespace\"";
     let mut crs = s.chars().peekable();
 
@@ -183,13 +187,12 @@ impl LanguageServer for Backend {
     }
 
     async fn document_color(&self, params: DocumentColorParams) -> Result<Vec<ColorInformation>> {
-        let cmp = self.completers.lock().await;
         let url = &params.text_document.uri;
         let hash_value = hash_uri(url);
 
-        let cmp_v = cmp.get(&hash_value);
+        let cmp_v = self.completers.get(&hash_value);
         if let Some(vv) = cmp_v {
-            if let Some(result) = vv.complete_color().await {
+            if let Some(result) = vv.complete_color(&self).await {
                 return Ok(result);
             }
         }
@@ -224,12 +227,9 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> Result<()> {
-        let mut m1 = self.cache_type_map.lock().await;
-        let mut m2 = self.completers.lock().await;
-        let mut m3 = self.id_2_namespace_map.lock().await;
-        m1.clear();
-        m2.clear();
-        m3.clear();
+        self.cache_type_map.clear();
+        self.completers.clear();
+        self.id_2_namespace_map.clear();
         Ok(())
     }
 
@@ -237,8 +237,7 @@ impl LanguageServer for Backend {
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let url = &params.text_document.uri;
         let key = hash_uri(url);
-        let cmp_map = self.completers.lock().await;
-        if let Some(cmp) = cmp_map.get(&key) {
+        if let Some(cmp) = self.completers.get(&key) {
             cmp.update_document(&params).await;
         }
     }
@@ -260,14 +259,14 @@ impl LanguageServer for Backend {
 
     /// do udpate namespace map for rename file
     async fn did_rename_files(&self, params: RenameFilesParams) {
-        let mut idmap = self.id_2_namespace_map.lock().await;
+        let idmap = &self.id_2_namespace_map;
         for i in params.files.iter() {
             if let Ok(o_url) = Url::parse(&i.old_uri)
                 && let Ok(n_url) = Url::parse(&i.new_uri)
             {
                 let ho = hash_uri(&o_url);
                 let hn = hash_uri(&n_url);
-                if let Some((_, v)) = idmap.remove_entry(&ho) {
+                if let Some((_, v)) = idmap.remove(&ho) {
                     idmap.insert(hn, v);
                 }
             }
@@ -276,13 +275,11 @@ impl LanguageServer for Backend {
 
     /// do clean namespace and cache_type map for delete file
     async fn did_delete_files(&self, params: DeleteFilesParams) {
-        let mut idmap = self.id_2_namespace_map.lock().await;
         for i in params.files.iter() {
             if let Ok(url) = Url::parse(&i.uri) {
                 let x = hash_uri(&url);
-                if let Some((_, v)) = idmap.remove_entry(&x) {
-                    let mut ct = self.cache_type_map.lock().await;
-                    ct.remove(v.as_ref());
+                if let Some((_, v)) = self.id_2_namespace_map.remove(&x) {
+                    self.cache_type_map.remove(v.as_ref());
                 }
             }
         }
@@ -298,11 +295,10 @@ impl LanguageServer for Backend {
         let arc_content: Arc<str> = Arc::from(content);
 
         let url = &params.text_document.uri;
-        if let Ok(()) = self.insert_namespace_by_content(url, &arc_content).await {
-            let mut cmp_map = self.completers.lock().await;
+        if let Ok(()) = self.insert_namespace_by_content(url, arc_content.clone()).await {
             let hash_value = hash_uri(url);
-            let new_cmp = Completer::from(arc_content);
-            cmp_map.entry(hash_value).or_insert(new_cmp);
+            let new_cmp = Completer::new(arc_content);
+            self.completers.entry(hash_value).or_insert(new_cmp);
         }
     }
 
@@ -311,17 +307,14 @@ impl LanguageServer for Backend {
         let url = &params.text_document.uri;
         trace!("close {}", json!(url));
         let hash_value = hash_uri(url);
-
-        let mut cmp_map = self.completers.lock().await;
-        cmp_map.remove(&hash_value);
+        self.completers.remove(&hash_value);
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        let cmp = self.completers.lock().await;
         let url = &params.text_document_position.text_document.uri;
         let hash_value = hash_uri(url);
 
-        let cmp_v = cmp.get(&hash_value);
+        let cmp_v = self.completers.get(&hash_value);
         if let Some(vv) = cmp_v {
             if let Some(result) = vv.compelte(self, &params).await {
                 return Ok(Some(CompletionResponse::Array(result)));
@@ -367,13 +360,12 @@ impl Backend {
         }
     }
 
-    async fn insert_namespace_by_content(&self, url: &Url, content: &Arc<str>) -> Result<()> {
+    async fn insert_namespace_by_content(&self, url: &Url, content: Arc<str>) -> Result<()> {
         let hash_value = hash_uri(url);
 
         let namespace_op = get_namespace(content);
         if let Some(v) = namespace_op {
-            let mut idmap = self.id_2_namespace_map.lock().await;
-            idmap.entry(hash_value).or_insert(Arc::from(v));
+            self.id_2_namespace_map.entry(hash_value).or_insert(Arc::from(v));
             return Ok(());
         }
         Err(Self::namespace_not_find_error(self, url.path()))
@@ -381,19 +373,16 @@ impl Backend {
 
     async fn insert_namespace(&self, url: &Url, namespace: Arc<str>) {
         let hash_value = hash_uri(url);
-        let mut idmap = self.id_2_namespace_map.lock().await;
-        idmap.entry(hash_value).or_insert(namespace);
+        self.id_2_namespace_map.entry(hash_value).or_insert(namespace);
     }
 
     async fn query_namespace(&self, url: &Url) -> Option<Arc<str>> {
         let hash_value = hash_uri(url);
-        let idmap = self.id_2_namespace_map.lock().await;
-        idmap.get(&hash_value).map(|v| v.to_owned())
+        self.id_2_namespace_map.get(&hash_value).map(|v| v.to_owned())
     }
 
     async fn query_type(&self, namespace: Arc<str>, control_n: Arc<str>) -> Option<String> {
-        let v = self.cache_type_map.lock().await;
-        let map = v.get(namespace.as_ref());
+        let map = self.cache_type_map.get(namespace.as_ref());
         if let Some(map_v) = map {
             let type_n = map_v.get(control_n.as_ref());
             if let Some(type_name) = type_n {
@@ -409,8 +398,7 @@ impl Backend {
         control_name: String,
         type_name: String,
     ) {
-        let mut map = self.cache_type_map.lock().await;
-        let value = map.entry(namespace.to_string()).or_insert(HashMap::new());
+        let mut value = self.cache_type_map.entry(namespace.to_string()).or_insert(HashMap::new());
         value.insert(control_name, type_name);
     }
 
@@ -459,8 +447,7 @@ impl Backend {
                     let part_name = parts[1];
 
                     let type_n_option = {
-                        let type_map = self.cache_type_map.lock().await;
-                        type_map
+                        self.cache_type_map
                             .get(part_namespace)
                             .and_then(|namespace_object| namespace_object.get(part_name).cloned())
                     };
@@ -502,6 +489,25 @@ impl Backend {
     }
 }
 
+fn extract_keyword_from_json<'a>(
+    keys: &[&str],
+    json_map: &'a HashMap<String, Value>,
+) -> HashSet<String> {
+    let mut keyword = HashSet::new();
+    for key in keys {
+        if let Some(value) = json_map.get(*key) {
+            if let Some(array) = value.as_array() {
+                for item in array {
+                    if let Some(string_value) = item.as_str() {
+                        keyword.insert(string_value.to_string());
+                    }
+                }
+            }
+        }
+    }
+    keyword
+}
+
 #[tokio::main]
 async fn main() {
     let stdin = tokio::io::stdin();
@@ -509,22 +515,24 @@ async fn main() {
     let log: flexi_logger::LoggerHandle = Logger::with(LogSpecification::info()).start().unwrap();
 
     let json_value: Value = serde_json::from_str(VANILLAPACK_DEFINE).unwrap();
-    let cache_type_map: HashMap<String, HashMap<String, String>> = json_value
-        .as_object()
-        .unwrap()
-        .into_iter()
-        .map(|(key, value)| {
+    
+    let cache_type_map = DashMap::with_shard_amount(2);
+    if let Some(json_object) = json_value.as_object() {
+        for (key, value) in json_object {
             let inner_map: HashMap<String, String> = value
                 .as_object()
                 .unwrap() // Handle None similarly for nested map
                 .into_iter()
                 .map(|(inner_key, inner_value)| {
-                    (inner_key.to_string(), inner_value.as_str().unwrap_or_default().to_string())
+                    (
+                        inner_key.to_string(),
+                        inner_value.as_str().unwrap_or_default().to_string(),
+                    )
                 })
                 .collect();
-            (key.to_string(), inner_map)
-        })
-        .collect();
+            cache_type_map.insert(key.to_string(), inner_map);
+        }
+    }
 
     let jsonui_define: Value = serde_json::from_str(JSONUI_DEFINE).unwrap();
     let obj = jsonui_define.as_object().ok_or("Expected a JSON object").unwrap();
@@ -533,14 +541,42 @@ async fn main() {
         jsonui_define_map.insert(key.to_string(), value.clone());
     }
 
+    let keys = [
+        "common",
+        "bindings_properties",
+        "none",
+        "global",
+        "collection",
+        "collection_details",
+        "view",
+        "label",
+        "image",
+        "stack_panel",
+        "input_panel",
+        "collection_panel",
+        "button",
+        "toggle",
+        "dropdown",
+        "slider",
+        "slider_box",
+        "edit_box",
+        "grid",
+        "scroll_view",
+        "selection_wheel",
+        "screen",
+        "custom",
+    ];
+    let keyword = extract_keyword_from_json(&keys, &jsonui_define_map);
+
     let (service, socket) = LspService::build(|client| Backend {
         client,
         log: Arc::new(log),
-        completers: Mutex::new(HashMap::new()),
-        cache_type_map: Mutex::new(cache_type_map),
+        completers:  DashMap::with_shard_amount(2),
+        cache_type_map,
         jsonui_define_map,
-        id_2_namespace_map: Mutex::new(HashMap::new()),
+        id_2_namespace_map: DashMap::with_shard_amount(2),
         lang: Mutex::new(Arc::from("zh-cn")),
+        parser: Parser::new(keyword),
     })
     .finish();
     Server::new(stdin, stdout, socket).serve(service).await;
@@ -552,16 +588,16 @@ mod tests {
 
     #[test]
     fn test_get_namespace_esay() {
-        let result = get_namespace(&r#"{"namespace": "test"}"#.into()).unwrap();
+        let result = get_namespace(Arc::from(r#"{"namespace": "test"}"#)).unwrap();
         let expect = "test";
         assert_eq!(result, expect);
     }
 
     #[test]
     fn test_get_namespace_hard() {
-        let result = get_namespace(
-            &r#"// this is comment{"test_control": {"type": "panel"},"namespace": "test"}"#.into(),
-        )
+        let result = get_namespace(Arc::from(
+            r#"// this is comment{"test_control": {"type": "panel"},"namespace": "test"}"#,
+        ))
         .unwrap();
         let expect = "test";
         assert_eq!(result, expect);

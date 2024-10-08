@@ -26,8 +26,6 @@ Install pnpm package manager.
 6. debug use `F5`
 
 ### Roadmap
-- Support auto-completion for additional controls (via the `jsonui_define.json` file)
-- Enable auto-completion for child controls
 - Implement variable navigation (requires extended context)
 - Add auto-completion for operation expressions in bindings
 - ...

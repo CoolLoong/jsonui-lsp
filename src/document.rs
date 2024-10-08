@@ -1,11 +1,15 @@
 use std::sync::Arc;
 
+use log::trace;
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{DidChangeTextDocumentParams, Position};
 use unicode_segmentation::UnicodeSegmentation;
 
+use crate::get_namespace;
+
 #[derive(Debug)]
 pub struct Document {
+    pub namespace: String,
     pub line_info_cache: Mutex<Vec<LineInfo>>,
     pub content_cache:   Mutex<String>,
     pub content_chars:   Mutex<Vec<Arc<str>>>,
@@ -18,11 +22,13 @@ pub struct LineInfo {
 }
 
 impl Document {
-    pub fn from(str: &String) -> Self {
+    pub fn from(str: Arc<str>) -> Self {
         let content: String = str.chars().collect();
         let content_chars: Vec<Arc<str>> = content.graphemes(true).map(Arc::from).collect();
+        let namespace = get_namespace(str.clone()).unwrap_or("unknown_namespace".to_string());
         Self {
-            line_info_cache: Self::init_line_info_cache(str),
+            namespace,
+            line_info_cache: Self::init_line_info_cache(str.as_ref()),
             content_cache:   Mutex::new(content),
             content_chars:   Mutex::new(content_chars),
         }
@@ -95,7 +101,7 @@ impl Document {
     }
 
     /// position line index start from 0
-    pub async fn get_index_from_position(&self, pos: &Position) -> Option<usize> {
+    pub async fn get_index_from_position(&self, pos: Position) -> Option<usize> {
         let line = pos.line as usize; // Index starts from 0
         let line_cache = self.line_info_cache.lock().await;
 
@@ -151,8 +157,8 @@ impl Document {
     pub async fn apply_change(&self, request: &DidChangeTextDocumentParams) {
         for e in request.content_changes.iter() {
             if let Some(v) = e.range {
-                let s = &v.start;
-                let end = &v.end;
+                let s = v.start;
+                let end = v.end;
                 let start_index = self.get_index_from_position(s).await;
                 let end_index = self.get_index_from_position(end).await;
                 if let Some(si) = start_index
@@ -170,6 +176,7 @@ impl Document {
     }
 
     fn handle_boundary_char<'a>(char: &'a str, boundary_stacks: &mut Vec<Vec<&'a str>>) {
+        trace!("{}",char);
         let (current_index, opposite_index) = match char {
             "{" => (0, 1),
             "}" => (1, 0),
@@ -187,6 +194,7 @@ impl Document {
     pub async fn get_boundary_indices(&self, index: usize) -> Option<(usize, usize)> {
         let content = self.content_chars.lock().await;
         let (forward, backward) = content.split_at(index);
+        trace!("{:?} {:?}",forward,backward);
         if forward.is_empty() || backward.is_empty() {
             return None;
         }
@@ -250,7 +258,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_apply_change() {
-        let document = Document::from(&EXAMPLE1.to_string());
+        let document = Document::from(Arc::from(EXAMPLE1));
         let request = DidChangeTextDocumentParams {
             text_document:   VersionedTextDocumentIdentifier {
                 uri:     Url::parse("https://example.com").unwrap(),
@@ -313,7 +321,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_apply_delete_change() {
-        let document = Document::from(&EXAMPLE1.to_string());
+        let document = Document::from(Arc::from(EXAMPLE1));
         let request = DidChangeTextDocumentParams {
             text_document:   VersionedTextDocumentIdentifier {
                 uri:     Url::parse("https://example.com").unwrap(),
@@ -342,7 +350,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_replace_grapheme_range() {
-        let document = Document::from(&"hello 世界".to_string());
+        let document = Document::from(Arc::from("hello 世界"));
         document.replace_grapheme_range(5, 5, Arc::from("MMM")).await;
         assert_eq!(*document.content_cache.lock().await, "helloMMM 世界");
         document.replace_grapheme_range(5, 8, Arc::from("XXX")).await;
@@ -353,9 +361,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_boundary_indices() {
-        let document = Document::from(&EXAMPLE1.to_string());
+        let document = Document::from(Arc::from(EXAMPLE1));
         let v: usize = document
-            .get_index_from_position(&Position {
+            .get_index_from_position(Position {
                 line:      16,
                 character: 6,
             })
@@ -369,7 +377,7 @@ mod tests {
         assert_eq!((lc.as_ref(), rc.as_ref()), ("\"", "}"));
 
         let v = document
-            .get_index_from_position(&Position {
+            .get_index_from_position(Position {
                 line:      6,
                 character: 3,
             })

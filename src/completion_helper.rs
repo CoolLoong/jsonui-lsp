@@ -6,7 +6,7 @@ use tower_lsp::lsp_types::{
     InsertTextFormat, Position, Range, TextEdit,
 };
 
-use crate::completion::{CompleteContext, ParsedToken, Value, TYPE_ARR, TYPE_COL, TYPE_CR};
+use crate::{completion::CompleteContext, parser::{ParsedToken, Value, TYPE_ARR, TYPE_COL, TYPE_CR}};
 
 const BINDINGS: &str = "bindings";
 const CONTROLS: &str = "controls";
@@ -59,7 +59,7 @@ pub(crate) async fn create_completion<'a>(
 
     param: &CompletionParams,
     context: &CompleteContext<'a>,
-    ast: &Vec<Value>,
+    ast: &'a Vec<Value>,
 ) -> Option<Vec<CompletionItem>> {
     trace!("{:?}\n\n AST {:?}\n--------------------------------", context, ast);
 

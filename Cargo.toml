@@ -14,10 +14,11 @@ jsonc-parser = { version = "0.23.0", features = ["serde"] }
 tokio = { version = "1.39.3", features = ["full"] }
 tower-lsp = { version = "0.20.0", features = ["proposed"] }
 log = "0.4"
-flexi_logger = "0.29.0"
+flexi_logger = "0.29.2"
 walkdir = "2.3"
 museair = "0.2.0"
 unicode-segmentation = "1.11.0"
+dashmap = "6.1.0"
 
 [workspace]
 members = ["vanillapack_define_gen"]
