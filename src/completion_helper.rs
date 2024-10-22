@@ -62,14 +62,14 @@ pub(crate) async fn create_completion<'a>(
     ast: &'a Vec<Value>,
 ) -> Option<Vec<CompletionItem>> {
     trace!("{:?}\n\n AST {:?}\n--------------------------------", context, ast);
-
     let type_c = context.control_type.lock().await;
     let nodes = context.nodes.lock().await;
     let input_c = context.input_char.lock().await;
 
-    let n1 = nodes[0];
-    let n2 = nodes[1];
-    let current = nodes[2];
+    let default1: &Option<&Value> = &None; 
+    let n1 = nodes.get(0).unwrap_or(default1);
+    let n2 = nodes.get(1).unwrap_or(default1);
+    let current = nodes.get(2).unwrap_or(default1);
 
     if let Some(first_ast_v) = ast.first()
         && let Some(ParsedToken::String(control_name)) = &first_ast_v.v
