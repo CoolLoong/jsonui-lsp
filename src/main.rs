@@ -24,7 +24,7 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use walkdir::WalkDir;
 
-const VANILLAPACK_DEFINE: &str = include_str!("../resources/vanillapack_define_1.21.30.3.json");
+const VANILLAPACK_DEFINE: &str = include_str!("../resources/vanillapack_define_1.21.40.3.json");
 const JSONUI_DEFINE: &str = include_str!("../resources/jsonui_define.json");
 const SEED: u64 = 32;
 
