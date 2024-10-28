@@ -4,49 +4,27 @@ mod completion;
 mod completion_helper;
 mod document;
 mod parser;
+mod path_info;
+mod tokenizer;
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use completion::Completer;
 use dashmap::DashMap;
 use flexi_logger::{LogSpecification, Logger, LoggerHandle};
-use jsonc_parser::{parse_to_serde_value, ParseOptions};
 use log::{set_max_level, trace};
 use parser::Parser;
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
-use walkdir::WalkDir;
 
 const VANILLAPACK_DEFINE: &str = include_str!("../resources/vanillapack_define_1.21.40.3.json");
 const JSONUI_DEFINE: &str = include_str!("../resources/jsonui_define.json");
-const SEED: u64 = 32;
-
-struct Backend {
-    client:             Client,
-    log:                Arc<LoggerHandle>,
-    completers:         DashMap<u64, Completer>,
-    /// cache namespace -> control_name -> control_type
-    cache_type_map:     DashMap<String, HashMap<String, String>>,
-    jsonui_define_map:  HashMap<String, Value>,
-    /// cache url -> namespace
-    id_2_namespace_map: DashMap<u64, Arc<str>>,
-    lang:               Mutex<Arc<str>>,
-    parser:             Parser,
-}
-
-fn extract_prefix(input: &str) -> &str {
-    match input.find('@') {
-        Some(index) => &input[..index],
-        None => input,
-    }
-}
 
 fn get_namespace(s: Arc<str>) -> Option<String> {
     const NAMESPACE: &str = "namespace\"";
@@ -63,9 +41,18 @@ fn get_namespace(s: Arc<str>) -> Option<String> {
     None
 }
 
+const SEED: u64 = 32;
 #[inline]
 fn hash_uri(url: &Url) -> u64 {
     museair::bfast::hash(url.path().as_bytes(), SEED)
+}
+
+struct Backend {
+    client:            Client,
+    log:               Arc<LoggerHandle>,
+    completers:        DashMap<u64, Completer>,
+    lang:              Mutex<Arc<str>>,
+    pub(crate) parser: Parser,
 }
 
 #[tower_lsp::async_trait]
@@ -227,9 +214,8 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> Result<()> {
-        self.cache_type_map.clear();
         self.completers.clear();
-        self.id_2_namespace_map.clear();
+        self.parser.close();
         Ok(())
     }
 
@@ -244,7 +230,8 @@ impl LanguageServer for Backend {
 
     /// do insert namespace and cache_type map for save file
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
-        self.process_workspace_file_by_url(&params.text_document.uri)
+        self.parser
+            .process_workspace_file_by_url(&params.text_document.uri)
             .await;
     }
 
@@ -252,14 +239,14 @@ impl LanguageServer for Backend {
     async fn did_create_files(&self, params: CreateFilesParams) {
         for i in params.files.iter() {
             if let Ok(url) = Url::parse(&i.uri) {
-                self.process_workspace_file_by_url(&url).await;
+                self.parser.process_workspace_file_by_url(&url).await;
             }
         }
     }
 
     /// do udpate namespace map for rename file
     async fn did_rename_files(&self, params: RenameFilesParams) {
-        let idmap = &self.id_2_namespace_map;
+        let idmap = &self.parser.id_2_namespace_map;
         for i in params.files.iter() {
             if let Ok(o_url) = Url::parse(&i.old_uri)
                 && let Ok(n_url) = Url::parse(&i.new_uri)
@@ -278,8 +265,8 @@ impl LanguageServer for Backend {
         for i in params.files.iter() {
             if let Ok(url) = Url::parse(&i.uri) {
                 let x = hash_uri(&url);
-                if let Some((_, v)) = self.id_2_namespace_map.remove(&x) {
-                    self.cache_type_map.remove(v.as_ref());
+                if let Some((_, v)) = self.parser.id_2_namespace_map.remove(&x) {
+                    self.parser.cache_type_map.remove(v.as_ref());
                 }
             }
         }
@@ -325,6 +312,22 @@ impl LanguageServer for Backend {
 }
 
 impl Backend {
+    async fn init_workspace(&self, workspace_folders: PathBuf) {}
+
+    async fn insert_namespace_by_content(&self, url: &Url, content: Arc<str>) -> Result<()> {
+        let hash_value = hash_uri(url);
+
+        let namespace_op = get_namespace(content);
+        if let Some(v) = namespace_op {
+            self.parser
+                .id_2_namespace_map
+                .entry(hash_value)
+                .or_insert(Arc::from(v));
+            return Ok(());
+        }
+        Err(Self::namespace_not_find_error(self, url.path()))
+    }
+
     fn namespace_not_find_error(&self, path: &str) -> Error {
         let e: ErrorCode = ErrorCode::ServerError(-35001);
         Error {
@@ -333,166 +336,9 @@ impl Backend {
             data:    None,
         }
     }
-
-    async fn init_workspace(&self, workspace_folders: PathBuf) {
-        for entry in WalkDir::new(workspace_folders)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().map_or(false, |ext| ext == "json"))
-            .filter(|e| !e.path().ends_with("_global_variables.json"))
-            .filter(|e| !e.path().ends_with("_ui_defs.json"))
-        {
-            let mut tmp_content_cache = HashMap::new();
-            if let Ok(content) = fs::read_to_string(entry.path()) {
-                if let Ok(Some(Value::Object(obj))) =
-                    parse_to_serde_value(&content, &ParseOptions::default())
-                {
-                    if let Some(Value::String(namespace)) = obj.get("namespace") {
-                        tmp_content_cache.entry(namespace.to_string()).or_insert(obj);
-                    }
-                }
-            }
-
-            let arc: Arc<HashMap<String, Map<String, Value>>> = Arc::new(tmp_content_cache);
-            for (k, v) in arc.iter() {
-                self.process_workspace_file(Some(&arc), k, None, v).await;
-            }
-        }
-    }
-
-    async fn insert_namespace_by_content(&self, url: &Url, content: Arc<str>) -> Result<()> {
-        let hash_value = hash_uri(url);
-
-        let namespace_op = get_namespace(content);
-        if let Some(v) = namespace_op {
-            self.id_2_namespace_map.entry(hash_value).or_insert(Arc::from(v));
-            return Ok(());
-        }
-        Err(Self::namespace_not_find_error(self, url.path()))
-    }
-
-    async fn insert_namespace(&self, url: &Url, namespace: Arc<str>) {
-        let hash_value = hash_uri(url);
-        self.id_2_namespace_map.entry(hash_value).or_insert(namespace);
-    }
-
-    async fn query_namespace(&self, url: &Url) -> Option<Arc<str>> {
-        let hash_value = hash_uri(url);
-        self.id_2_namespace_map.get(&hash_value).map(|v| v.to_owned())
-    }
-
-    async fn query_type(&self, namespace: Arc<str>, control_n: Arc<str>) -> Option<String> {
-        let map = self.cache_type_map.get(namespace.as_ref());
-        if let Some(map_v) = map {
-            let type_n = map_v.get(control_n.as_ref());
-            if let Some(type_name) = type_n {
-                return Some(type_name.clone());
-            }
-        }
-        None
-    }
-
-    async fn insert_control_type<'a>(
-        &self,
-        namespace: &String,
-        control_name: String,
-        type_name: String,
-    ) {
-        let mut value = self.cache_type_map.entry(namespace.to_string()).or_insert(HashMap::new());
-        value.insert(control_name, type_name);
-    }
-
-    async fn process_workspace_file_by_url(&self, url: &Url) {
-        if let Ok(r) = url.to_file_path() {
-            if let Ok(content) = fs::read_to_string(r) {
-                if let Ok(Some(Value::Object(obj))) =
-                    parse_to_serde_value(&content, &ParseOptions::default())
-                {
-                    if let Some(Value::String(namespace)) = obj.get("namespace") {
-                        self.insert_namespace(url, Arc::from(namespace.as_str())).await;
-                        self.process_workspace_file(None, namespace, None, &obj).await;
-                    }
-                }
-            }
-        }
-    }
-
-    async fn process_workspace_file(
-        &self,
-        temp_content_cache: Option<&Arc<HashMap<String, Map<String, Value>>>>,
-        namespace: &String,
-        control_name: Option<&str>,
-        root: &Map<String, Value>,
-    ) {
-        for (key, value) in root {
-            let sp: Vec<&str> = key.split('@').collect();
-            let (prefix, suffix) = if sp.len() == 2 {
-                (Some(sp[0]), Some(sp[1]))
-            } else {
-                (Some(key.as_str()), None)
-            };
-
-            if let Some(type_value) = value.get("type").and_then(Value::as_str) {
-                let control_name = control_name.unwrap_or(prefix.unwrap());
-                self.insert_control_type(namespace, control_name.to_string(), type_value.to_string())
-                    .await;
-            } else if let Some(suffix) = suffix {
-                let mut parts: Vec<&str> = suffix.split('.').collect();
-                if parts.len() == 1 {
-                    parts.insert(0, namespace);
-                }
-
-                if parts.len() == 2 {
-                    let part_namespace = parts[0];
-                    let part_name = parts[1];
-
-                    let type_n_option = {
-                        self.cache_type_map
-                            .get(part_namespace)
-                            .and_then(|namespace_object| namespace_object.get(part_name).cloned())
-                    };
-
-                    if let Some(type_n) = type_n_option {
-                        self.insert_control_type(namespace, part_name.to_string(), type_n)
-                            .await;
-                    } else if let Some(cache_v) = &temp_content_cache
-                        && let Some(namespace_object) = cache_v.get(namespace)
-                    {
-                        if let Some((_, vv)) = namespace_object.iter().find(|(kk, vv)| {
-                            if let Value::Object(_) = vv {
-                                extract_prefix(kk) == part_name
-                            } else {
-                                false
-                            }
-                        }) {
-                            if let Value::Object(obj) = vv {
-                                let next = control_name.or(Some(prefix.unwrap()));
-                                Box::pin(self.process_workspace_file(
-                                    temp_content_cache,
-                                    namespace,
-                                    next,
-                                    obj,
-                                ))
-                                .await;
-                            }
-                        }
-                    }
-                }
-            } else if key == "type" {
-                if let Value::String(v) = value {
-                    let control_name = control_name.unwrap_or(prefix.unwrap());
-                    self.insert_control_type(namespace, control_name.to_string(), v.clone())
-                        .await;
-                }
-            }
-        }
-    }
 }
 
-fn extract_keyword_from_json(
-    keys: &[&str],
-    json_map: &HashMap<String, Value>,
-) -> HashSet<String> {
+fn extract_keyword_from_json(keys: &[&str], json_map: &HashMap<String, Value>) -> HashSet<String> {
     let mut keyword = HashSet::new();
     for key in keys {
         if let Some(value) = json_map.get(*key) {
@@ -515,7 +361,7 @@ async fn main() {
     let log: flexi_logger::LoggerHandle = Logger::with(LogSpecification::info()).start().unwrap();
 
     let json_value: Value = serde_json::from_str(VANILLAPACK_DEFINE).unwrap();
-    
+
     let cache_type_map = DashMap::with_shard_amount(2);
     if let Some(json_object) = json_value.as_object() {
         for (key, value) in json_object {
@@ -524,19 +370,16 @@ async fn main() {
                 .unwrap() // Handle None similarly for nested map
                 .into_iter()
                 .map(|(inner_key, inner_value)| {
-                    (
-                        inner_key.to_string(),
-                        inner_value.as_str().unwrap_or_default().to_string(),
-                    )
+                    (inner_key.to_string(), inner_value.as_str().unwrap_or_default().to_string())
                 })
                 .collect();
             cache_type_map.insert(key.to_string(), inner_map);
         }
     }
 
-    let jsonui_define: Value = serde_json::from_str(JSONUI_DEFINE).unwrap();
+    let jsonui_define: serde_json::Value = serde_json::from_str(JSONUI_DEFINE).unwrap();
     let obj = jsonui_define.as_object().ok_or("Expected a JSON object").unwrap();
-    let mut jsonui_define_map: HashMap<String, Value> = HashMap::new();
+    let mut jsonui_define_map: HashMap<String, serde_json::Value> = HashMap::new();
     for (key, value) in obj {
         jsonui_define_map.insert(key.to_string(), value.clone());
     }
@@ -571,12 +414,9 @@ async fn main() {
     let (service, socket) = LspService::build(|client| Backend {
         client,
         log: Arc::new(log),
-        completers:  DashMap::with_shard_amount(2),
-        cache_type_map,
-        jsonui_define_map,
-        id_2_namespace_map: DashMap::with_shard_amount(2),
+        completers: DashMap::with_shard_amount(2),
         lang: Mutex::new(Arc::from("zh-cn")),
-        parser: Parser::new(keyword),
+        parser: Parser::new(cache_type_map, jsonui_define_map, DashMap::with_shard_amount(2), keyword),
     })
     .finish();
     Server::new(stdin, stdout, socket).serve(service).await;

@@ -6,19 +6,20 @@ use tower_lsp::lsp_types::{
     InsertTextFormat, Position, Range, TextEdit,
 };
 
-use crate::{completion::CompleteContext, parser::{ParsedToken, Value, TYPE_ARR, TYPE_COL, TYPE_CR}};
+use crate::completion::CompleteContext;
+use crate::tokenizer::prelude::*;
 
 const BINDINGS: &str = "bindings";
 const CONTROLS: &str = "controls";
 
 fn create_binding_type_input<'a>(
-    ast: &'a Vec<Value>,
+    ast: &'a Vec<TokenValue>,
     define_map: &'a HashMap<String, serde_json::Value>,
-    current: &'a Value,
+    current: &'a TokenValue,
 ) -> Vec<&'a serde_json::Value> {
     let mut inputs: Vec<&serde_json::Value> = vec![];
     let path = &current.path;
-    let binding_type: Option<&Value> = if path.len() > 1
+    let binding_type: Option<&TokenValue> = if path.len() > 1
         && let Some(ParsedToken::Array(arr)) = &ast[path[0]].v
         && let Some(ParsedToken::Controls(obj)) = &arr[path[1]].v
     {
@@ -59,14 +60,14 @@ pub(crate) async fn create_completion<'a>(
 
     param: &CompletionParams,
     context: &CompleteContext<'a>,
-    ast: &'a Vec<Value>,
+    ast: &'a Vec<TokenValue>,
 ) -> Option<Vec<CompletionItem>> {
     trace!("{:?}\n\n AST {:?}\n--------------------------------", context, ast);
     let type_c = context.control_type.lock().await;
     let nodes = context.nodes.lock().await;
     let input_c = context.input_char.lock().await;
 
-    let default1: &Option<&Value> = &None; 
+    let default1: &Option<&TokenValue> = &None;
     let n1 = nodes.get(0).unwrap_or(default1);
     let n2 = nodes.get(1).unwrap_or(default1);
     let current = nodes.get(2).unwrap_or(default1);
@@ -232,7 +233,7 @@ fn create_value_completion(
     }
 }
 
-pub(crate) fn from_color_value_to_color_arr(v: &Value) -> Option<Color> {
+pub(crate) fn from_color_value_to_color_arr(v: &TokenValue) -> Option<Color> {
     if let Some(ParsedToken::String(color_str)) = &v.v {
         return match color_str.as_ref() {
             "white" => Some(Color {

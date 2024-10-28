@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::{
 
 use crate::completion_helper::{create_completion, from_color_value_to_color_arr};
 use crate::document::Document;
-use crate::parser::{ParsedToken, Value, TYPE_STR};
+use crate::tokenizer::prelude::*;
 use crate::Backend;
 
 /// `CompleteContext` is a struct used to describe contextual information at the completion position
@@ -22,7 +22,7 @@ pub(crate) struct CompleteContext<'a> {
     pub(crate) r:            Mutex<usize>,
     pub(crate) index:        Mutex<usize>,
     pub(crate) input_char:   Mutex<Arc<str>>,
-    pub(crate) nodes:        Mutex<Vec<Option<&'a Value>>>,
+    pub(crate) nodes:        Mutex<Vec<Option<&'a TokenValue>>>,
 }
 impl<'a> CompleteContext<'a> {
     /// create an empty `CompleteContext`
@@ -49,7 +49,7 @@ impl<'a> CompleteContext<'a> {
 #[derive(Debug)]
 pub(crate) struct Completer {
     document: Document,
-    ast:      Mutex<Option<Vec<Value>>>,
+    ast:      Mutex<Option<Vec<TokenValue>>>,
 }
 
 impl Completer {
@@ -68,14 +68,14 @@ impl Completer {
 
         let ast = bk
             .parser
-            .parse((*context.l.lock().await, *context.r.lock().await), &self.document)
+            .parse_tokens((*context.l.lock().await, *context.r.lock().await), &self.document)
             .await;
 
         let r: Option<Vec<CompletionItem>> = if let Some(ref ast_v) = ast {
             Self::fill_context(bk, ast_v, &param.text_document_position.text_document.uri, &context)
                 .await;
             let lang = bk.lang.lock().await;
-            create_completion(lang.as_ref(), &bk.jsonui_define_map, param, &context, ast_v).await
+            create_completion(lang.as_ref(), &bk.parser.jsonui_define_map, param, &context, ast_v).await
         } else {
             None
         };
@@ -89,12 +89,12 @@ impl Completer {
             let chars = self.document.content_chars.lock().await;
             (0, chars.len() - 1)
         };
-        let ast: Option<Vec<Value>> = bk.parser.parse(tuple, &self.document).await;
+        let ast: Option<Vec<TokenValue>> = bk.parser.parse_tokens(tuple, &self.document).await;
         if ast.is_none() {
             trace!("cant build full ast!");
             return None;
         }
-        let inputs: &Vec<Value> = ast.as_ref().unwrap();
+        let inputs: &Vec<TokenValue> = ast.as_ref().unwrap();
         let mut results = Vec::new();
         Self::flatten_ast(inputs, &mut results);
 
@@ -159,7 +159,7 @@ impl Completer {
 
     async fn fill_context<'a>(
         bk: &Backend,
-        ast: &'a Vec<Value>,
+        ast: &'a Vec<TokenValue>,
         docs_url: &Url,
         context: &'a CompleteContext<'a>,
     ) {
@@ -170,7 +170,7 @@ impl Completer {
         let node_index = result.iter().rposition(|value| value.r <= v_index);
 
         // find the neighbors node corresponding to the current index
-        let mut neighbors: Vec<Option<&'a Value>> = Vec::with_capacity(5);
+        let mut neighbors: Vec<Option<&'a TokenValue>> = Vec::with_capacity(5);
         if let Some(i) = node_index {
             let i = i as i32;
             for offset in -1..4 {
@@ -205,7 +205,7 @@ impl Completer {
         if control_type_mut.is_none()
             && let Some(ParsedToken::String(control_name)) = &ast[0].v
         {
-            let namespace: Option<Arc<str>> = bk.query_namespace(docs_url).await;
+            let namespace: Option<Arc<str>> = bk.parser.query_namespace(docs_url).await;
             let control_t = Self::fill_control_type(bk, namespace, control_name).await;
             if let Some(v) = control_t {
                 *control_type_mut = Some(Arc::from(v.as_str()));
@@ -224,7 +224,7 @@ impl Completer {
         if vec.len() == 1
             && let Some(np) = namespace
         {
-            return bk.query_type(np, Arc::from(vec[0])).await;
+            return bk.parser.query_type(np, Arc::from(vec[0])).await;
         } else if vec.len() == 2 {
             let refer_namespace = vec[1];
             let namespace_sp: Vec<&str> = refer_namespace.split(".").collect();
@@ -232,12 +232,13 @@ impl Completer {
                 let refer_namespace_n = namespace_sp[0];
                 let refer_control_n = namespace_sp[1];
                 return bk
+                    .parser
                     .query_type(Arc::from(refer_namespace_n), Arc::from(refer_control_n))
                     .await;
             } else if namespace_sp.len() == 1
                 && let Some(np) = namespace
             {
-                return bk.query_type(np, Arc::from(namespace_sp[0])).await;
+                return bk.parser.query_type(np, Arc::from(namespace_sp[0])).await;
             }
         }
         None
@@ -247,7 +248,7 @@ impl Completer {
         self.document.apply_change(request).await;
     }
 
-    fn flatten_ast<'a>(input: &'a [Value], result: &mut Vec<&'a Value>) {
+    fn flatten_ast<'a>(input: &'a [TokenValue], result: &mut Vec<&'a TokenValue>) {
         for i in input {
             if let Some(v) = &i.v {
                 result.push(i);
@@ -261,7 +262,7 @@ impl Completer {
         }
     }
 
-    fn flatten_ast_one_layer<'a>(input: &'a [Value], result: &mut Vec<&'a Value>) {
+    fn flatten_ast_one_layer<'a>(input: &'a [TokenValue], result: &mut Vec<&'a TokenValue>) {
         for i in input {
             if let Some(v) = &i.v {
                 result.push(i);
@@ -277,12 +278,9 @@ impl Completer {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use tower_lsp::lsp_types::Position;
 
     use super::*;
-    use crate::parser::Parser;
 
     const EXAMPLE1: &str = include_str!("../test/achievement_screen.json");
 
@@ -314,7 +312,7 @@ mod tests {
     async fn test_build_ast() {
         let completer = Completer::new(EXAMPLE1.into());
         let context = &CompleteContext::new();
-        let parser = Parser::new(HashSet::new());
+        let tokenizer = Tokenizer::new();
 
         completer
             .build_context(
@@ -326,7 +324,7 @@ mod tests {
             )
             .await;
         {
-            let ast = parser
+            let ast = tokenizer
                 .parse((*context.l.lock().await, *context.r.lock().await), &completer.document)
                 .await;
             assert!(ast.is_some());
@@ -343,7 +341,7 @@ mod tests {
                 context,
             )
             .await;
-        let ast = parser
+        let ast = tokenizer
             .parse((*context.l.lock().await, *context.r.lock().await), &completer.document)
             .await;
         assert!(ast.is_none());

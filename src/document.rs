@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use log::trace;
 use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{DidChangeTextDocumentParams, Position};
 use unicode_segmentation::UnicodeSegmentation;
@@ -176,7 +175,7 @@ impl Document {
     }
 
     fn handle_boundary_char<'a>(char: &'a str, boundary_stacks: &mut Vec<Vec<&'a str>>) {
-        trace!("{}",char);
+        //trace!("{}",char);
         let (current_index, opposite_index) = match char {
             "{" => (0, 1),
             "}" => (1, 0),
@@ -194,7 +193,7 @@ impl Document {
     pub async fn get_boundary_indices(&self, index: usize) -> Option<(usize, usize)> {
         let content = self.content_chars.lock().await;
         let (forward, backward) = content.split_at(index);
-        trace!("{:?} {:?}",forward,backward);
+        //trace!("{:?} {:?}",forward,backward);
         if forward.is_empty() || backward.is_empty() {
             return None;
         }
