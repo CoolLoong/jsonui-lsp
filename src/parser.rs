@@ -3,15 +3,18 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use chumsky::prelude::*;
 use dashmap::DashMap;
 use jsonc_parser::{parse_to_serde_value, ParseOptions};
+use log::trace;
 use serde_json::Map;
 use tower_lsp::lsp_types::Url;
+use tree_ds::prelude::*;
 use walkdir::WalkDir;
 
+use crate::chumsky::Token;
 use crate::document::Document;
-use crate::hash_uri;
-use crate::tokenizer::prelude::*;
+use crate::{hash_uri, tokenizer};
 
 fn extract_prefix(input: &str) -> &str {
     match input.find('@') {
@@ -20,37 +23,112 @@ fn extract_prefix(input: &str) -> &str {
     }
 }
 
+type ChumskyParser<'a> = Boxed<'a, 'a, &'a str, Vec<Token<'a>>, extra::Err<Rich<'a, char>>>;
+type AutoTree<T> = Tree<u32, T>;
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub(crate) struct ControlNode {
+    name:      Arc<str>,
+    type_n:    Arc<str>,
+    variables: std::collections::HashSet<String>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Hash)]
+pub(crate) struct VariablePath {
+    namespace: Arc<str>,
+    control:   Arc<str>,
+    name:      Arc<str>,
+}
+
 pub struct Parser {
-    // namespace -> (control_name,type_name)
-    pub(crate) cache_type_map:     DashMap<String, HashMap<String, String>>,
-    pub(crate) jsonui_define_map:  HashMap<String, serde_json::Value>,
-    pub(crate) id_2_namespace_map: DashMap<u64, Arc<str>>,
-    pub(crate) keyword:            HashSet<String>,
-    tokenizer:                     Tokenizer,
+    pub(crate) variable_table: DashMap<VariablePath, (usize, usize)>,
+    pub(crate) trees:          DashMap<String, AutoTree<ControlNode>>,
+    pub(crate) keyword:        HashSet<String>,
 }
 
 impl Parser {
-    pub fn new(
-        cache_type_map: DashMap<String, HashMap<String, String>>,
-        jsonui_define_map: HashMap<String, serde_json::Value>,
-        id_2_namespace_map: DashMap<u64, Arc<str>>,
-        keyword: HashSet<String>,
-    ) -> Self {
-        Parser {
-            cache_type_map,
-            jsonui_define_map,
-            id_2_namespace_map,
+    pub fn new(workspace_folders: &PathBuf, keyword: HashSet<String>) {
+        let parser = Parser {
+            variable_table: DashMap::with_shard_amount(2),
+            trees: DashMap::with_shard_amount(2),
             keyword,
-            tokenizer: Tokenizer::new(),
+        };
+
+        for entry in WalkDir::new(workspace_folders)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().map_or(false, |ext| ext == "json"))
+            .filter(|e| !e.path().ends_with("_global_variables.json"))
+            .filter(|e| !e.path().ends_with("_ui_defs.json"))
+        {
+            if let Ok(content) = fs::read_to_string(entry.path()) {
+                let tokenizer = crate::chumsky::parser::<'_>();
+                let r = crate::chumsky::parse(tokenizer, content.as_ref());
+                match r {
+                    Ok(r) => Self::handle_tokens(&parser, r),
+                    Err(e) => {
+                        trace!("error in new parser{:?}", e)
+                    }
+                }
+            }
         }
     }
 
-    pub(crate) async fn parse_tokens(
-        &self,
-        pos: (usize, usize),
-        doc: &Document,
-    ) -> Option<Vec<TokenValue>> {
-        return self.tokenizer.parse(pos, doc).await;
+    fn handle_tokens(parser: &Parser, tokens: Vec<Token<'_>>) {
+        let np = Self::find_namespace(&tokens);
+        if let Some(np) = np {
+            let tr: Tree<u32, ControlNode> = AutoTree::<ControlNode>::new(Option::Some(np.as_str()));
+            Self::build_control_tree(&tr, &tokens);
+        } else {
+            trace!("cant find namespace from tokens {:?}", tokens);
+        }
+    }
+
+    fn find_namespace(tokens: &Vec<Token<'_>>) -> Option<String> {
+        tokens
+            .iter()
+            .enumerate()
+            .find(|(_, token)| matches!(token, Token::Str(_, "namespace")))
+            .and_then(|(index, _)| match tokens.get(index + 2) {
+                Some(Token::Str(_, s)) => Some(String::from(*s)),
+                _ => None,
+            })
+    }
+
+    fn find_type(tokens: &Vec<Token<'_>>) -> Option<String> {
+        tokens
+            .iter()
+            .enumerate() // 加上索引以便找到 "namespace" 的位置
+            .find(|(_, token)| matches!(token, Token::Str(_, "namespace"))) // 找到第一个 "namespace"
+            .and_then(|(index, _)| match tokens.get(index + 2) {
+                Some(Token::Str(_, s)) => Some(String::from(*s)),
+                _ => None,
+            })
+    }
+
+    fn build_control_tree(tr: &Tree<u32, ControlNode>, tokens: &Vec<Token<'_>>) {
+        for i in tokens {
+            match i {
+                Token::Controls(a, b) => {
+                    
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub(crate) async fn input(pos: (usize, usize), doc: &Document) -> String {
+        let chars = doc.content_chars.lock().await;
+        let (l, r) = pos;
+        Self::join(&chars[l..r + 1])
+    }
+
+    pub(crate) fn parse(&'a self, input: &'a str) -> Result<Vec<Token<'a>>, Vec<Rich<'a, char>>> {
+        crate::chumsky::parse(&self.tokenizer, input)
+    }
+
+    fn join(arcs: &[Arc<str>]) -> String {
+        arcs.iter().map(|s| s.as_ref()).collect::<Vec<&str>>().join("")
     }
 
     pub async fn init(&self, workspace_folders: &PathBuf) {
@@ -212,20 +290,13 @@ impl Parser {
         None
     }
 
-    async fn insert_control_type<'a>(
-        &self,
-        namespace: &String,
-        control_name: String,
-        type_name: String,
-    ) {
+    async fn insert_control_type(&self, namespace: &String, control_name: String, type_name: String) {
         let mut value = self
             .cache_type_map
             .entry(namespace.to_string())
             .or_insert(HashMap::new());
         value.insert(control_name, type_name);
     }
-
-    fn handle_symbol(&self, doc: &Document, ast: &Vec<TokenValue>) {}
 
     pub(crate) fn close(&self) {
         self.cache_type_map.clear();

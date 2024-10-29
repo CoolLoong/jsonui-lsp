@@ -6,6 +6,7 @@ mod document;
 mod parser;
 mod path_info;
 mod tokenizer;
+mod chumsky;
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};

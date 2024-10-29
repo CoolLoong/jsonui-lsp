@@ -8,7 +8,7 @@ use crate::get_namespace;
 
 #[derive(Debug)]
 pub struct Document {
-    pub namespace: String,
+    pub namespace:       String,
     pub line_info_cache: Mutex<Vec<LineInfo>>,
     pub content_cache:   Mutex<String>,
     pub content_chars:   Mutex<Vec<Arc<str>>>,
@@ -28,8 +28,8 @@ impl Document {
         Self {
             namespace,
             line_info_cache: Self::init_line_info_cache(str.as_ref()),
-            content_cache:   Mutex::new(content),
-            content_chars:   Mutex::new(content_chars),
+            content_cache: Mutex::new(content),
+            content_chars: Mutex::new(content_chars),
         }
     }
 
@@ -175,7 +175,7 @@ impl Document {
     }
 
     fn handle_boundary_char<'a>(char: &'a str, boundary_stacks: &mut Vec<Vec<&'a str>>) {
-        //trace!("{}",char);
+        // trace!("{}",char);
         let (current_index, opposite_index) = match char {
             "{" => (0, 1),
             "}" => (1, 0),
@@ -193,7 +193,7 @@ impl Document {
     pub async fn get_boundary_indices(&self, index: usize) -> Option<(usize, usize)> {
         let content = self.content_chars.lock().await;
         let (forward, backward) = content.split_at(index);
-        //trace!("{:?} {:?}",forward,backward);
+        // trace!("{:?} {:?}",forward,backward);
         if forward.is_empty() || backward.is_empty() {
             return None;
         }
