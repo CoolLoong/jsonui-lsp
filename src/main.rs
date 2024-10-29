@@ -1,13 +1,14 @@
 #![feature(let_chains)]
 
+mod chumsky;
 mod completion;
 mod completion_helper;
 mod document;
 mod parser;
 mod path_info;
-mod tokenizer;
-mod chumsky;
+mod tree_ds;
 
+use core::panicking::panic;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -16,7 +17,7 @@ use std::sync::Arc;
 use completion::Completer;
 use dashmap::DashMap;
 use flexi_logger::{LogSpecification, Logger, LoggerHandle};
-use log::{set_max_level, trace};
+use log::{error, set_max_level, trace};
 use parser::Parser;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
@@ -339,15 +340,16 @@ impl Backend {
     }
 }
 
-fn extract_keyword_from_json(keys: &[&str], json_map: &HashMap<String, Value>) -> HashSet<String> {
+fn extract_keyword_from_json(
+    keys: &[&str],
+    json_map: &HashMap<String, chumsky::Token>,
+) -> HashSet<String> {
     let mut keyword = HashSet::new();
     for key in keys {
         if let Some(value) = json_map.get(*key) {
-            if let Some(array) = value.as_array() {
-                for item in array {
-                    if let Some(string_value) = item.as_str() {
-                        keyword.insert(string_value.to_string());
-                    }
+            if let Some(v) = chumsky::to_array_ref(value) {
+                for item in v {
+                    keyword.insert(chumsky::to_string_ref(item));
                 }
             }
         }
@@ -361,30 +363,53 @@ async fn main() {
     let stdout = tokio::io::stdout();
     let log: flexi_logger::LoggerHandle = Logger::with(LogSpecification::info()).start().unwrap();
 
-    let json_value: Value = serde_json::from_str(VANILLAPACK_DEFINE).unwrap();
-
-    let cache_type_map = DashMap::with_shard_amount(2);
-    if let Some(json_object) = json_value.as_object() {
-        for (key, value) in json_object {
-            let inner_map: HashMap<String, String> = value
-                .as_object()
-                .unwrap() // Handle None similarly for nested map
-                .into_iter()
-                .map(|(inner_key, inner_value)| {
-                    (inner_key.to_string(), inner_value.as_str().unwrap_or_default().to_string())
-                })
-                .collect();
-            cache_type_map.insert(key.to_string(), inner_map);
+    let r = crate::chumsky::parse(crate::chumsky::parser(), VANILLAPACK_DEFINE);
+    let vanilla_controls_tabel = match r {
+        Ok(r) => {
+            let result = HashMap::<String, parser::ControlDefine>::new();
+            let m = chumsky::to_map(r);
+            for (k1, v) in m {
+                if let chumsky::Token::Controls(_, (_, _, v)) = v {
+                    let m = chumsky::to_map(v);
+                    for (k2, v) in m {
+                        if let chumsky::Token::Controls(_, (_, _, v)) = v {
+                            let m = chumsky::to_map(v);
+                            let name: Arc<str> = Arc::from(k1 + "." + k2.as_ref());
+                            let type_n: Arc<str> =
+                                if let chumsky::Token::Str(_, v) = m.get("type").unwrap() {
+                                    Arc::from(*v)
+                                } else {
+                                    unreachable!()
+                                };
+                            let variables = if let Some(v) = m.get("variables")
+                                && let chumsky::Token::Array(_, v) = v
+                            {
+                                chumsky::to_arc_str_hashset(*v)
+                            } else {
+                                HashSet::new()
+                            };
+                            result.insert(
+                                name.to_string(),
+                                parser::ControlDefine {
+                                    name,
+                                    type_n,
+                                    variables,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+            result
         }
-    }
+        Err(e) => {
+            panic!("error in load vanilla pack definition {:?}.", e)
+        }
+    };
 
-    let jsonui_define: serde_json::Value = serde_json::from_str(JSONUI_DEFINE).unwrap();
-    let obj = jsonui_define.as_object().ok_or("Expected a JSON object").unwrap();
-    let mut jsonui_define_map: HashMap<String, serde_json::Value> = HashMap::new();
-    for (key, value) in obj {
-        jsonui_define_map.insert(key.to_string(), value.clone());
-    }
-
+    let jsonui_define = crate::chumsky::parse(crate::chumsky::parser(), JSONUI_DEFINE)
+        .expect("can parse jsonui_define.json");
+    let jsonui_define_map: HashMap<String, chumsky::Token<'_>> = chumsky::to_map(jsonui_define);
     let keys = [
         "common",
         "bindings_properties",
@@ -417,7 +442,7 @@ async fn main() {
         log: Arc::new(log),
         completers: DashMap::with_shard_amount(2),
         lang: Mutex::new(Arc::from("zh-cn")),
-        parser: Parser::new(cache_type_map, jsonui_define_map, DashMap::with_shard_amount(2), keyword),
+        parser: Parser::new(keyword, vanilla_controls_tabel),
     })
     .finish();
     Server::new(stdin, stdout, socket).serve(service).await;

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use chumsky::prelude::*;
 
 #[derive(PartialEq, Debug)]
@@ -13,7 +15,7 @@ pub(crate) enum Token<'a> {
     Controls(SimpleSpan, (&'a str, char, Vec<Token<'a>>)),
 }
 
-type ChumskyParser<'a> = Boxed<'a, 'a, &'a str, Vec<Token<'a>>, extra::Err<Rich<'a, char>>>;
+pub(crate) type ChumskyParser<'a> = Boxed<'a, 'a, &'a str, Vec<Token<'a>>, extra::Err<Rich<'a, char>>>;
 
 pub(crate) fn parser<'a>() -> ChumskyParser<'a> {
     recursive(|value| {
@@ -139,6 +141,113 @@ pub(crate) fn parse<'a>(
     input: &'a str,
 ) -> Result<Vec<Token<'a>>, Vec<Rich<'a, char>>> {
     parser.parse(input).into_result()
+}
+
+pub(crate) fn to_map(tokens: Vec<Token>) -> std::collections::HashMap<String, Token> {
+    let mut key: String = String::new();
+    let mut collect: bool = false;
+    let mut r = std::collections::HashMap::<String, Token>::new();
+    for i in tokens {
+        match i {
+            Token::Controls(_, (key, _, _)) => {
+                r.insert(key.to_string(), i);
+            }
+            Token::Str(_, v) => {
+                key.push_str(v);
+            }
+            Token::Colon(_) => collect = true,
+            _ => {
+                if collect {
+                    r.insert(key.clone(), i);
+                    collect = false;
+                    key.clear();
+                }
+            }
+        }
+    }
+    r
+}
+
+pub(crate) fn to_arc_str_hashset<T>(tokens: Vec<Token>) -> HashSet<std::sync::Arc<str>> {
+    let mut r = HashSet::new();
+    for i in tokens {
+        if let Token::Str(_, v) = i {
+            r.insert(std::sync::Arc::from(v));
+        }
+    }
+    r
+}
+
+pub(crate) fn to_string(token: Token) -> String {
+    if let Token::Str(_, v) = token {
+        String::from(v)
+    } else {
+        String::new()
+    }
+}
+
+pub(crate) fn to_string_ref<'a>(token: &'a Token<'a>) -> String {
+    if let Token::Str(_, v) = token {
+        String::from(*v)
+    } else {
+        String::new()
+    }
+}
+
+pub(crate) fn to_array(token: Token) -> Vec<Token> {
+    if let Token::Array(_, v) = token {
+        v
+    } else {
+        vec![]
+    }
+}
+
+pub(crate) fn to_array_ref<'a>(token: &'a Token<'a>) -> Option<&'a Vec<Token<'a>>> {
+    if let Token::Array(_, v) = token {
+        Some(v)
+    } else {
+        None
+    }
+}
+
+pub(crate) fn to_bool(token: Token) -> bool {
+    if let Token::Bool(_, v) = token {
+        v
+    } else {
+        false
+    }
+}
+
+pub(crate) fn to_bool_ref<'a>(token: &'a Token<'a>) -> bool {
+    if let Token::Bool(_, v) = token {
+        *v
+    } else {
+        false
+    }
+}
+
+pub(crate) fn to_number(token: Token) -> f64 {
+    if let Token::Num(_, v) = token {
+        v
+    } else {
+        0 as f64
+    }
+}
+
+pub(crate) fn to_number_ref<'a>(token: &'a Token<'a>) -> f64 {
+    if let Token::Num(_, v) = token {
+        *v
+    } else {
+        0 as f64
+    }
+}
+
+#[allow(unused_imports)]
+pub(crate) mod prelude {
+    pub(crate) use super::{
+        parse, parser, to_arc_str_hashset, to_array, to_array_ref, to_bool, to_bool_ref, to_map,
+        to_number, to_number_ref, to_string, to_string_ref, ChumskyParser, Token,
+    };
 }
 
 #[cfg(test)]

@@ -5,16 +5,14 @@ use std::sync::Arc;
 
 use chumsky::prelude::*;
 use dashmap::DashMap;
-use jsonc_parser::{parse_to_serde_value, ParseOptions};
 use log::trace;
-use serde_json::Map;
 use tower_lsp::lsp_types::Url;
-use tree_ds::prelude::*;
+use crate::tree_ds::prelude::*;
 use walkdir::WalkDir;
 
 use crate::chumsky::Token;
 use crate::document::Document;
-use crate::{hash_uri, tokenizer};
+use crate::hash_uri;
 
 fn extract_prefix(input: &str) -> &str {
     match input.find('@') {
@@ -28,32 +26,37 @@ type AutoTree<T> = Tree<u32, T>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) struct ControlNode {
-    name:      Arc<str>,
-    type_n:    Arc<str>,
-    variables: std::collections::HashSet<String>,
+    define: ControlDefine,
+    loc:    (usize, usize),
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Hash)]
-pub(crate) struct VariablePath {
-    namespace: Arc<str>,
-    control:   Arc<str>,
-    name:      Arc<str>,
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub(crate) struct ControlDefine {
+    pub(crate) name:      Arc<str>,
+    pub(crate) type_n:    Arc<str>,
+    pub(crate) variables: std::collections::HashSet<Arc<str>>,
 }
 
 pub struct Parser {
-    pub(crate) variable_table: DashMap<VariablePath, (usize, usize)>,
-    pub(crate) trees:          DashMap<String, AutoTree<ControlNode>>,
-    pub(crate) keyword:        HashSet<String>,
+    trees:                  DashMap<String, AutoTree<ControlNode>>,
+    keyword:                HashSet<String>,
+    vanilla_controls_tabel: HashMap<String, ControlDefine>,
 }
 
 impl Parser {
-    pub fn new(workspace_folders: &PathBuf, keyword: HashSet<String>) {
-        let parser = Parser {
-            variable_table: DashMap::with_shard_amount(2),
+    
+    pub fn new(
+        keyword: HashSet<String>,
+        vanilla_controls_tabel: HashMap<String, ControlDefine>,
+    ) -> Self {
+        Parser {
             trees: DashMap::with_shard_amount(2),
             keyword,
-        };
+            vanilla_controls_tabel,
+        }
+    }
 
+    pub(crate) fn init(&self, workspace_folders: &PathBuf) {
         for entry in WalkDir::new(workspace_folders)
             .into_iter()
             .filter_map(|e| e.ok())
@@ -65,7 +68,7 @@ impl Parser {
                 let tokenizer = crate::chumsky::parser::<'_>();
                 let r = crate::chumsky::parse(tokenizer, content.as_ref());
                 match r {
-                    Ok(r) => Self::handle_tokens(&parser, r),
+                    Ok(r) => Self::handle_tokens(self, r),
                     Err(e) => {
                         trace!("error in new parser{:?}", e)
                     }
@@ -109,9 +112,7 @@ impl Parser {
     fn build_control_tree(tr: &Tree<u32, ControlNode>, tokens: &Vec<Token<'_>>) {
         for i in tokens {
             match i {
-                Token::Controls(a, b) => {
-                    
-                }
+                Token::Controls(a, b) => {}
                 _ => {}
             }
         }
