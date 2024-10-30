@@ -43,7 +43,7 @@ fn main() -> io::Result<()> {
     let map: &RefCell<HashMap<String, Value>> = namespace_map.borrow();
     for (k, v) in map.borrow().iter() {
         let mut export_map: HashMap<String, serde_json::Value> = HashMap::new();
-        process_properties(None, &v, &mut export_map, &map.borrow());
+        process_properties(None, &k.clone(), &v, &mut export_map, &map.borrow());
         result.insert(k.clone(), export_map);
     }
 
@@ -81,6 +81,7 @@ fn process_file(path: &Path, namespace_map: &mut HashMap<String, Value>) -> io::
 
 fn process_properties(
     name: Option<&str>,
+    namespace: &String,
     properties: &Value,
     export_map: &mut HashMap<String, serde_json::Value>,
     namespace_map: &HashMap<String, Value>,
@@ -88,10 +89,6 @@ fn process_properties(
     for (key, value) in properties.as_object().unwrap() {
         let split_key: Vec<&str> = key.split('@').collect();
         let np = name.unwrap_or(split_key[0]).to_string();
-
-        if np == "custom_slider" {
-            println!("");
-        }
 
         if let Value::Object(map) = value {
             for map_key in map.keys() {
@@ -104,7 +101,7 @@ fn process_properties(
         }
 
         if key.contains('@') {
-            handle_namespace(key, namespace_map, name, export_map);
+            handle_namespace(key, &namespace, namespace_map, name, export_map);
         } else if key == "type" {
             set_export_type(export_map, &np, value.as_str().unwrap());
         } else if key.starts_with('$') {
@@ -136,6 +133,7 @@ fn set_export_type(export_map: &mut HashMap<String, serde_json::Value>, key: &st
 
 fn handle_namespace(
     key: &str,
+    namespace: &String,
     namespace_map: &HashMap<String, Value>,
     name: Option<&str>,
     export_map: &mut HashMap<String, serde_json::Value>,
@@ -144,19 +142,26 @@ fn handle_namespace(
     if parts.len() == 2 {
         let rest = parts[1];
         let parts_namespace: Vec<&str> = rest.split('.').collect();
-        if parts_namespace.len() == 2 {
-            let namespace = parts_namespace[0];
-            let control_name = parts_namespace[1];
-            if let Some(namespace_object) = namespace_map.get(namespace) {
-                if let Some(ns_properties) = namespace_object.as_object() {
-                    for (kk, v) in ns_properties {
-                        if extract_prefix(kk) == control_name {
-                            let next_name = name.or(Some(parts[0]));
-                            let json = format!("{{ \"{}\": {} }}", kk, serde_json::to_string(v).unwrap());
-                            let target = serde_json::from_str(json.as_str()).unwrap();
-                            process_properties(next_name, &target, export_map, namespace_map);
-                            break;
-                        }
+        let (np, cn) = if parts_namespace.len() == 2 {
+            (parts_namespace[0], parts_namespace[1])
+        } else {
+            (namespace.as_ref(), parts_namespace[0])
+        };
+        if let Some(namespace_object) = namespace_map.get(np) {
+            if let Some(ns_properties) = namespace_object.as_object() {
+                for (kk, v) in ns_properties {
+                    if extract_prefix(kk) == cn {
+                        let next_name = name.or(Some(parts[0]));
+                        let json = format!("{{ \"{}\": {} }}", kk, serde_json::to_string(v).unwrap());
+                        let target = serde_json::from_str(json.as_str()).unwrap();
+                        process_properties(
+                            next_name,
+                            &np.to_string(),
+                            &target,
+                            export_map,
+                            namespace_map,
+                        );
+                        break;
                     }
                 }
             }

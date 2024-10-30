@@ -1,6 +1,5 @@
-use sequential_gen::prelude::EpochBasedGenerator;
-use sequential_gen::prelude::Generator;
 use super::*;
+use crate::generator::{unix_epoch::EpochBasedGenerator, Generator};
 
 pub const GENERATOR: EpochBasedGenerator = EpochBasedGenerator;
 
@@ -37,7 +36,7 @@ where
     /// ```
     ///
     /// This is available only when the `auto_id` feature is enabled.
-    pub fn new_with_auto_id(value: Option<T>) -> Self {
+    pub fn new_auto(value: Option<T>) -> Self {
         {
             Self(Arc::new(Mutex::new(_Node {
                 node_id: Q::from(GENERATOR.generate()),
@@ -56,8 +55,8 @@ mod tests {
 
     #[test]
     fn test_new_with_auto_id_async() {
-        let node = Node::<AutomatedId, &str>::new_with_auto_id(Some("Harry Doe"));
-        let node_2 = Node::<AutomatedId, &str>::new_with_auto_id(Some("Jane Doe"));
+        let node = Node::<AutomatedId, &str>::new_auto(Some("Harry Doe"));
+        let node_2 = Node::<AutomatedId, &str>::new_auto(Some("Jane Doe"));
         assert_eq!(node.get_value(), Some("Harry Doe"));
         assert_ne!(node.get_node_id(), node_2.get_node_id());
     }

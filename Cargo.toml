@@ -18,7 +18,6 @@ unicode-segmentation = "1.11.0"
 dashmap = "6.1.0"
 chumsky = "1.0.0-alpha.7"
 thiserror = "1.0.65"
-sequential_gen = "0.1.2"
 
 [workspace]
 members = ["vanillapack_define_gen"]

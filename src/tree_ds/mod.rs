@@ -147,15 +147,12 @@
 //!   the `no_std` feature will result in nothing being serialized or deserialized.
 
 mod lib {
-    pub use std::format;
+    pub use std::collections::HashSet;
     pub use std::rc::Rc;
+    pub use std::string::{String, ToString};
     pub use std::sync::Arc;
-    pub use std::{
-        collections::HashSet,
-        string::{String, ToString},
-        vec,
-        vec::Vec,
-    };
+    pub use std::vec::Vec;
+    pub use std::{format, vec};
 
     pub use self::core::cell::RefCell;
     pub use self::core::clone::Clone;

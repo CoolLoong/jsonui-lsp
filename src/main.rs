@@ -4,26 +4,25 @@ mod chumsky;
 mod completion;
 mod completion_helper;
 mod document;
+mod generator;
 mod parser;
 mod path_info;
 mod tree_ds;
 
-use core::panicking::panic;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use completion::Completer;
-use dashmap::DashMap;
 use flexi_logger::{LogSpecification, Logger, LoggerHandle};
-use log::{error, set_max_level, trace};
+use log::{set_max_level, trace};
 use parser::Parser;
-use serde_json::{json, Value};
 use tokio::sync::Mutex;
 use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
+
+type StdMutex<T> = std::sync::Mutex<T>;
 
 const VANILLAPACK_DEFINE: &str = include_str!("../resources/vanillapack_define_1.21.40.3.json");
 const JSONUI_DEFINE: &str = include_str!("../resources/jsonui_define.json");
@@ -52,7 +51,6 @@ fn hash_uri(url: &Url) -> u64 {
 struct Backend {
     client:            Client,
     log:               Arc<LoggerHandle>,
-    completers:        DashMap<u64, Completer>,
     lang:              Mutex<Arc<str>>,
     pub(crate) parser: Parser,
 }
@@ -105,7 +103,7 @@ impl LanguageServer for Backend {
             }
         }
         let client_lang = init_config.get("locale").unwrap();
-        trace!("client lang is {}", json!(client_lang));
+        trace!("client lang is {:?}", client_lang);
         *self.lang.lock().await = Arc::from(client_lang.as_str().unwrap());
 
         if let Some(root_url) = param.root_uri
@@ -176,15 +174,16 @@ impl LanguageServer for Backend {
     }
 
     async fn document_color(&self, params: DocumentColorParams) -> Result<Vec<ColorInformation>> {
-        let url = &params.text_document.uri;
-        let hash_value = hash_uri(url);
+        // TODO: REFACTOR
+        // let url = &params.text_document.uri;
+        // let hash_value = hash_uri(url);
 
-        let cmp_v = self.completers.get(&hash_value);
-        if let Some(vv) = cmp_v {
-            if let Some(result) = vv.complete_color(self).await {
-                return Ok(result);
-            }
-        }
+        // let cmp_v = self.completers.get(&hash_value);
+        // if let Some(vv) = cmp_v {
+        //     if let Some(result) = vv.complete_color(self).await {
+        //         return Ok(result);
+        //     }
+        // }
         Ok(vec![])
     }
 
@@ -216,8 +215,6 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> Result<()> {
-        self.completers.clear();
-        self.parser.close();
         Ok(())
     }
 
@@ -225,53 +222,58 @@ impl LanguageServer for Backend {
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let url = &params.text_document.uri;
         let key = hash_uri(url);
-        if let Some(cmp) = self.completers.get(&key) {
-            cmp.update_document(&params).await;
-        }
+        // TODO: REFACTOR
+        // if let Some(cmp) = self.completers.get(&key) {
+        //     cmp.update_document(&params).await;
+        // }
     }
 
     /// do insert namespace and cache_type map for save file
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
-        self.parser
-            .process_workspace_file_by_url(&params.text_document.uri)
-            .await;
+        // TODO: REFACTOR
+        // self.parser
+        //     .process_workspace_file_by_url(&params.text_document.uri)
+        //     .await;
     }
 
     /// do insert namespace and cache_type map for create file
     async fn did_create_files(&self, params: CreateFilesParams) {
-        for i in params.files.iter() {
-            if let Ok(url) = Url::parse(&i.uri) {
-                self.parser.process_workspace_file_by_url(&url).await;
-            }
-        }
+        // TODO: REFACTOR
+        // for i in params.files.iter() {
+        //     if let Ok(url) = Url::parse(&i.uri) {
+        //         self.parser.process_workspace_file_by_url(&url).await;
+        //     }
+        // }
     }
 
     /// do udpate namespace map for rename file
     async fn did_rename_files(&self, params: RenameFilesParams) {
-        let idmap = &self.parser.id_2_namespace_map;
-        for i in params.files.iter() {
-            if let Ok(o_url) = Url::parse(&i.old_uri)
-                && let Ok(n_url) = Url::parse(&i.new_uri)
-            {
-                let ho = hash_uri(&o_url);
-                let hn = hash_uri(&n_url);
-                if let Some((_, v)) = idmap.remove(&ho) {
-                    idmap.insert(hn, v);
-                }
-            }
-        }
+        // TODO: REFACTOR
+        // let idmap = &self.parser.id_2_namespace_map;
+        // for i in params.files.iter() {
+        //     if let Ok(o_url) = Url::parse(&i.old_uri)
+        //         && let Ok(n_url) = Url::parse(&i.new_uri)
+        //     {
+        //         let ho = hash_uri(&o_url);
+        //         let hn = hash_uri(&n_url);
+        //         if let Some((_, v)) = idmap.remove(&ho) {
+        //             idmap.insert(hn, v);
+        //         }
+        //     }
+        // }
     }
 
     /// do clean namespace and cache_type map for delete file
     async fn did_delete_files(&self, params: DeleteFilesParams) {
-        for i in params.files.iter() {
-            if let Ok(url) = Url::parse(&i.uri) {
-                let x = hash_uri(&url);
-                if let Some((_, v)) = self.parser.id_2_namespace_map.remove(&x) {
-                    self.parser.cache_type_map.remove(v.as_ref());
-                }
-            }
-        }
+        // TODO: REFACTOR
+        // for i in params.files.iter() {
+        //     if let Ok(url) = Url::parse(&i.uri) {
+        //         let x = hash_uri(&url);
+        //         if let Some((_, v)) = self.parser.id_2_namespace_map.remove(&x) {
+        //             self.parser.cache_type_map.remove(v.as_ref());
+        //         }
+        //     }
+        // }
     }
 
     /// do insert namespace and completers for open file
@@ -279,54 +281,60 @@ impl LanguageServer for Backend {
         if params.text_document.language_id != "json" {
             return;
         }
-        trace!("open {}", json!(params.text_document.uri));
+        trace!("open {:?}", params.text_document.uri);
         let content: String = params.text_document.text.as_str().chars().collect();
         let arc_content: Arc<str> = Arc::from(content);
 
-        let url = &params.text_document.uri;
-        if let Ok(()) = self.insert_namespace_by_content(url, arc_content.clone()).await {
-            let hash_value = hash_uri(url);
-            let new_cmp = Completer::new(arc_content);
-            self.completers.entry(hash_value).or_insert(new_cmp);
-        }
+        // TODO: REFACTOR
+        // let url = &params.text_document.uri;
+        // if let Ok(()) = self.insert_namespace_by_content(url, arc_content.clone()).await {
+        //     let hash_value = hash_uri(url);
+        //     let new_cmp = Completer::new(arc_content);
+        //     self.completers.entry(hash_value).or_insert(new_cmp);
+        // }
     }
 
     /// do clean completer for close file
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let url = &params.text_document.uri;
-        trace!("close {}", json!(url));
+        trace!("close {}", url);
         let hash_value = hash_uri(url);
-        self.completers.remove(&hash_value);
+        // TODO: REFACTOR
+        // self.completers.remove(&hash_value);
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        let url = &params.text_document_position.text_document.uri;
-        let hash_value = hash_uri(url);
+        // TODO: REFACTOR
+        // let url = &params.text_document_position.text_document.uri;
+        // let hash_value = hash_uri(url);
 
-        let cmp_v = self.completers.get(&hash_value);
-        if let Some(vv) = cmp_v {
-            if let Some(result) = vv.compelte(self, &params).await {
-                return Ok(Some(CompletionResponse::Array(result)));
-            }
-        }
+        // let cmp_v = self.completers.get(&hash_value);
+        // if let Some(vv) = cmp_v {
+        //     if let Some(result) = vv.compelte(self, &params).await {
+        //         return Ok(Some(CompletionResponse::Array(result)));
+        //     }
+        // }
         Ok(None)
     }
 }
 
 impl Backend {
-    async fn init_workspace(&self, workspace_folders: PathBuf) {}
+    async fn init_workspace(&self, workspace_folders: PathBuf) {
+        self.parser.init(&workspace_folders);
+    }
 
     async fn insert_namespace_by_content(&self, url: &Url, content: Arc<str>) -> Result<()> {
-        let hash_value = hash_uri(url);
+        // TODO: REFACTOR
+        // let hash_value = hash_uri(url);
 
-        let namespace_op = get_namespace(content);
-        if let Some(v) = namespace_op {
-            self.parser
-                .id_2_namespace_map
-                .entry(hash_value)
-                .or_insert(Arc::from(v));
-            return Ok(());
-        }
+        // let namespace_op = get_namespace(content);
+        // if let Some(v) = namespace_op {
+        //     self.parser
+        //         .id_2_namespace_map
+        //         .entry(hash_value)
+        //         .or_insert(Arc::from(v));
+        //     return Ok(());
+        // }
         Err(Self::namespace_not_find_error(self, url.path()))
     }
 
@@ -366,25 +374,26 @@ async fn main() {
     let r = crate::chumsky::parse(crate::chumsky::parser(), VANILLAPACK_DEFINE);
     let vanilla_controls_tabel = match r {
         Ok(r) => {
-            let result = HashMap::<String, parser::ControlDefine>::new();
+            let mut result = HashMap::<String, parser::ControlDefine>::new();
             let m = chumsky::to_map(r);
             for (k1, v) in m {
-                if let chumsky::Token::Controls(_, (_, _, v)) = v {
+                if let chumsky::Token::Controls(_, v) = v {
                     let m = chumsky::to_map(v);
                     for (k2, v) in m {
-                        if let chumsky::Token::Controls(_, (_, _, v)) = v {
+                        if let chumsky::Token::Controls(_, v) = v {
                             let m = chumsky::to_map(v);
-                            let name: Arc<str> = Arc::from(k1 + "." + k2.as_ref());
-                            let type_n: Arc<str> =
-                                if let chumsky::Token::Str(_, v) = m.get("type").unwrap() {
-                                    Arc::from(*v)
-                                } else {
-                                    unreachable!()
-                                };
+                            let name: Arc<str> = Arc::from(k1.clone() + "." + k2.as_ref());
+                            let type_n: Arc<str> = if let Some(chumsky::Token::Str(_, v)) = m.get("type")
+                            {
+                                Arc::from(*v)
+                            } else {
+                                trace!("cant find type for {:?}", m);
+                                Arc::from("")
+                            };
                             let variables = if let Some(v) = m.get("variables")
                                 && let chumsky::Token::Array(_, v) = v
                             {
-                                chumsky::to_arc_str_hashset(*v)
+                                chumsky::to_arc_str_hashset(v)
                             } else {
                                 HashSet::new()
                             };
@@ -392,8 +401,9 @@ async fn main() {
                                 name.to_string(),
                                 parser::ControlDefine {
                                     name,
-                                    type_n,
-                                    variables,
+                                    extend: Arc::from("vanilla"),
+                                    type_n: StdMutex::new(type_n),
+                                    variables: StdMutex::new(variables),
                                 },
                             );
                         }
@@ -440,7 +450,6 @@ async fn main() {
     let (service, socket) = LspService::build(|client| Backend {
         client,
         log: Arc::new(log),
-        completers: DashMap::with_shard_amount(2),
         lang: Mutex::new(Arc::from("zh-cn")),
         parser: Parser::new(keyword, vanilla_controls_tabel),
     })

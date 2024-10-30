@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::vec;
 
 use chumsky::prelude::*;
 
@@ -12,7 +13,7 @@ pub(crate) enum Token<'a> {
     Colon(SimpleSpan),
     Comma(SimpleSpan),
     Array(SimpleSpan, Vec<Token<'a>>),
-    Controls(SimpleSpan, (&'a str, char, Vec<Token<'a>>)),
+    Controls(SimpleSpan, Vec<Token<'a>>),
 }
 
 pub(crate) type ChumskyParser<'a> = Boxed<'a, 'a, &'a str, Vec<Token<'a>>, extra::Err<Rich<'a, char>>>;
@@ -20,19 +21,28 @@ pub(crate) type ChumskyParser<'a> = Boxed<'a, 'a, &'a str, Vec<Token<'a>>, extra
 pub(crate) fn parser<'a>() -> ChumskyParser<'a> {
     recursive(|value| {
         let digits = text::digits(10).to_slice();
-
-        let frac = just('.').then(digits);
-
-        let exp = just('e').or(just('E')).then(one_of("+-").or_not()).then(digits);
-
+        let frac = just('.').then(digits.clone());
+        let exp = just('e')
+            .or(just('E'))
+            .then(one_of("+-").or_not())
+            .then(digits.clone());
         let number = just('-')
             .or_not()
-            .then(text::int(10))
+            .then(digits.clone())
             .then(frac.or_not())
             .then(exp.or_not())
-            .padded_by(text::whitespace())
             .to_slice()
-            .map_with(|s: &str, e| Token::Num(e.span(), s.parse().unwrap()));
+            .map_with(|s: &str, e| {
+                Token::Num(
+                    e.span(),
+                    s.parse::<f64>().expect(&format!(
+                        "parse number error in {}, value {}.",
+                        e.span(),
+                        s
+                    )),
+                )
+            })
+            .padded_by(text::whitespace());
 
         let escape = just('\\')
             .then(choice((
@@ -93,10 +103,10 @@ pub(crate) fn parser<'a>() -> ChumskyParser<'a> {
                     .recover_with(skip_then_retry_until(any().ignored(), end())),
             );
 
-        let controls = string
+        let controls = value
             .clone()
-            .then(just(':').padded_by(text::whitespace()))
-            .then(value.clone().repeated().collect::<Vec<Token<'a>>>())
+            .repeated()
+            .collect::<Vec<Token<'a>>>()
             .delimited_by(
                 just('{'),
                 just('}')
@@ -105,15 +115,7 @@ pub(crate) fn parser<'a>() -> ChumskyParser<'a> {
                     .recover_with(skip_then_retry_until(any().ignored(), end())),
             )
             .padded_by(text::whitespace())
-            .map_with(|s, e| {
-                let t1 = s.0;
-                let (v1, v2) = t1;
-                let x = match v1 {
-                    Token::Str(_, str) => str,
-                    _ => panic!(),
-                };
-                Token::Controls(e.span(), (x, v2, s.1))
-            });
+            .map_with(|s, e| Token::Controls(e.span(), s));
 
         choice((
             just("true").map_with(|_, e| Token::Bool(e.span(), true)),
@@ -140,39 +142,118 @@ pub(crate) fn parse<'a>(
     parser: ChumskyParser<'a>,
     input: &'a str,
 ) -> Result<Vec<Token<'a>>, Vec<Rich<'a, char>>> {
-    parser.parse(input).into_result()
+    parser.parse(input).into_result().map(|e| {
+        let first_controls = e.into_iter().find(|t| matches!(t, Token::Controls(_, _)));
+        if let Some(Token::Controls(_, v)) = first_controls {
+            v
+        } else {
+            vec![]
+        }
+    })
+}
+
+fn collect_v<'a>(
+    start: &SimpleSpan,
+    end: &SimpleSpan,
+    v: &'a Token<'a>,
+) -> ((usize, usize), &'a Token<'a>) {
+    ((start.start, end.end), v)
 }
 
 pub(crate) fn to_map(tokens: Vec<Token>) -> std::collections::HashMap<String, Token> {
-    let mut key: String = String::new();
-    let mut collect: bool = false;
-    let mut r = std::collections::HashMap::<String, Token>::new();
+    let mut key = String::new();
+    let mut collect = false;
+    let mut r = std::collections::HashMap::new();
     for i in tokens {
         match i {
-            Token::Controls(_, (key, _, _)) => {
-                r.insert(key.to_string(), i);
-            }
             Token::Str(_, v) => {
-                key.push_str(v);
-            }
-            Token::Colon(_) => collect = true,
-            _ => {
                 if collect {
-                    r.insert(key.clone(), i);
+                    r.insert(std::mem::take(&mut key), i);
                     collect = false;
-                    key.clear();
+                } else {
+                    key.push_str(v);
                 }
             }
+            Token::Colon(_) => collect = true,
+            _ if collect => {
+                r.insert(std::mem::take(&mut key), i);
+                collect = false;
+            }
+            _ => {}
         }
     }
     r
 }
 
-pub(crate) fn to_arc_str_hashset<T>(tokens: Vec<Token>) -> HashSet<std::sync::Arc<str>> {
+pub(crate) fn to_map_ref<'a>(
+    tokens: &'a Vec<Token<'a>>,
+) -> std::collections::HashMap<String, &'a Token<'a>> {
+    let mut key = String::new();
+    let mut collect = false;
+    let mut r = std::collections::HashMap::new();
+    for i in tokens {
+        match i {
+            Token::Str(_, v) => {
+                if collect {
+                    r.insert(std::mem::take(&mut key), i);
+                    collect = false;
+                } else {
+                    key.push_str(v);
+                }
+            }
+            Token::Colon(_) => collect = true,
+            _ if collect => {
+                r.insert(std::mem::take(&mut key), i);
+                collect = false;
+            }
+            _ => {}
+        }
+    }
+    r
+}
+
+pub(crate) fn to_map_with_span_ref<'a>(
+    tokens: &'a Vec<Token<'a>>,
+) -> std::collections::HashMap<String, ((usize, usize), &'a Token<'a>)> {
+    let mut key = String::new();
+    let mut start_span = None;
+    let mut collect = false;
+    let mut r = std::collections::HashMap::new();
+
+    for i in tokens {
+        match i {
+            Token::Str(span, v) => {
+                if collect {
+                    let start = start_span.expect("Missing key for value in `to_map_with_span_ref`");
+                    r.insert(std::mem::take(&mut key), collect_v(start, span, i));
+                    collect = false;
+                } else {
+                    key.push_str(v);
+                    start_span = Some(span);
+                }
+            }
+            Token::Colon(_) => collect = true,
+            Token::Array(span, _)
+            | Token::Controls(span, _)
+            | Token::Num(span, _)
+            | Token::Bool(span, _)
+                if collect =>
+            {
+                let start = start_span.expect("Missing key for value in `to_map_with_span_ref`");
+                r.insert(std::mem::take(&mut key), collect_v(start, span, i));
+                collect = false;
+            }
+            _ => {}
+        }
+    }
+    r
+}
+
+pub(crate) fn to_arc_str_hashset(tokens: &Vec<Token>) -> HashSet<std::sync::Arc<str>> {
     let mut r = HashSet::new();
     for i in tokens {
         if let Token::Str(_, v) = i {
-            r.insert(std::sync::Arc::from(v));
+            r.insert(std::sync::Arc::from(*v));
         }
     }
     r
@@ -246,19 +327,21 @@ pub(crate) fn to_number_ref<'a>(token: &'a Token<'a>) -> f64 {
 pub(crate) mod prelude {
     pub(crate) use super::{
         parse, parser, to_arc_str_hashset, to_array, to_array_ref, to_bool, to_bool_ref, to_map,
-        to_number, to_number_ref, to_string, to_string_ref, ChumskyParser, Token,
+        to_map_with_span_ref, to_number, to_number_ref, to_string, to_string_ref, ChumskyParser, Token,
     };
 }
 
 #[cfg(test)]
 mod tests {
-    use chumsky::Parser;
+    use core::panic;
 
-    use super::parser;
-    use crate::chumsky::Token;
+    use chumsky::prelude::*;
+
+    use super::{parse, parser, to_map, ChumskyParser};
+    use crate::chumsky::{to_number, to_number_ref, Token};
 
     const EXAMPLE1: &str = include_str!("../test/achievement_screen.json");
-
+    const VANILLAPACK_DEFINE: &str = include_str!("../resources/vanillapack_define_1.21.40.3.json");
     #[test]
     fn test_parse() {
         let parser = parser();
@@ -268,6 +351,58 @@ mod tests {
                 println!("{:?}", r);
                 assert_eq!(2, r.len());
                 assert!(matches!(r.get(1).unwrap(), Token::Controls(_, _)));
+            }
+            Err(e) => {
+                panic!("{:?}", e);
+            }
+        }
+    }
+    #[test]
+    fn test_parse_2() {
+        let parser = parser();
+        let r = parser
+            .parse(
+                r#"
+                {
+  "radio_toggle_group": {
+    "description": { "zh-cn": "是否启用开关组", "en-us": "radio_toggle_group" },
+    "values": [
+      { "label": "true", "kind": 12, "insert_text_format": 1 },
+      { "label": "false", "kind": 12, "insert_text_format": 1 }
+    ]
+  }
+}"#,
+            )
+            .into_result();
+        match r {
+            Ok(ref r) => {
+                println!("{:?}", r);
+                assert_eq!(1, r.len());
+                if let Token::Controls(_, ref v) = r[0]
+                    && let Token::Str(_, v) = v[0]
+                {
+                    assert_eq!("radio_toggle_group", v);
+                } else {
+                    panic!()
+                }
+            }
+            Err(ref e) => {
+                panic!("{:?}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn test_to_map() {
+        let parser = parser();
+        let r = parse(parser, EXAMPLE1);
+
+        match r {
+            Ok(r) => {
+                let r = to_map(r);
+                assert!(r.contains_key("namespace"));
+                assert!(r.contains_key("full_progress_bar_icon_base_test"));
+                println!("{:?}", r);
             }
             Err(e) => {
                 panic!("{:?}", e);
