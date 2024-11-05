@@ -1,4 +1,3 @@
-use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
 use tower_lsp::lsp_types::{CompletionItem, Position};
@@ -6,8 +5,6 @@ use tower_lsp::lsp_types::{CompletionItem, Position};
 use crate::completer::{AutoTree, ControlNode};
 use crate::document::Document;
 use crate::tree_ds::prelude::{AutomatedId, Node};
-
-pub(crate) struct NormalCompletionParam {}
 
 pub(crate) fn normal(
     pos: &Position,
@@ -17,11 +14,12 @@ pub(crate) fn normal(
     doc: &Document,
     tree: &AutoTree<ControlNode>,
 ) -> Option<Vec<CompletionItem>> {
-    // let root = tree.get_root_node().expect("cant get root node");
-    // let r = find_current_node(tree, &root, index);
-    // if let Some(r) = r{
-    //     tree.get_node_by_id(r)
-    // }
+    let root = tree.get_root_node().expect("cant get root node");
+    let r = find_closest_node(tree, &root, index);
+    if let Some(r) = r {
+        let n = tree.get_node_by_id(&r).unwrap();
+
+    }
     None
 }
 
@@ -69,7 +67,7 @@ mod tests {
 
     #[cfg(test)]
     #[test]
-    fn test_completer_init() {
+    fn test_find_closest_node() {
         use crate::complete_helper::find_closest_node;
 
         let p = crate::load_completer();
@@ -78,9 +76,14 @@ mod tests {
         let trees = p.trees.read().unwrap();
         let r = trees.get("add_external_server");
         let r = r.unwrap();
-        println!("{}", r);
+
         let cr = find_closest_node(r, &r.get_root_node().unwrap(), 1000);
         let cr = cr.expect("cant find closest node");
-        println!("{}", r.get_node_by_id(&cr).unwrap());
+        let r = r.get_node_by_id(&cr);
+        if let Some(v) = r {
+            assert_eq!("remove_button", v.get_value().unwrap().define.name.as_ref());
+        } else {
+            panic!()
+        }
     }
 }

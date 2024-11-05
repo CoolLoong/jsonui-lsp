@@ -364,7 +364,6 @@ impl Completer {
             Self::build_control_tree(&mut tr, &tokens, &ctx);
             Some((np, tr))
         } else {
-            println!("{:?}", tokens);
             trace!("cant find namespace from tokens {:?}", &format!("{:?}", tokens)[..100]);
             None
         }
