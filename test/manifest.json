@@ -1,0 +1,20 @@
+{
+  "format_version": 2,
+  "header": {
+    "name": "Test",
+    "description": "Test",
+    "uuid": "792bede7-0000-0000-0000-dd20395d1263",
+    "version": [0, 0, 1],
+    "min_engine_version": [1, 20, 80]
+  },
+  "metadata": {
+    "authors": ["CoolLoong"]
+  },
+  "modules": [
+    {
+      "type": "resources",
+      "uuid": "792bede7-0001-0001-0001-dd20395d1263",
+      "version": [1, 0, 0]
+    }
+  ]
+}

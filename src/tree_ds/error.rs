@@ -26,16 +26,13 @@ mod tests {
     #[test]
     fn test_error_fmt() {
         let err = Error::InvalidOperation("Invalid operation".to_string());
-        assert_eq!(format!("{:?}", err), "Error: Invalid operation");
+        assert_eq!(r#"Invalid operation: Invalid operation"#, format!("{}", err));
     }
 
     #[test]
     fn test_error_fmt_root_node_already_present() {
         let err = Error::RootNodeAlreadyPresent;
-        assert_eq!(
-            format!("{:?}", err),
-            "Error: Root node already present in the tree. You cannot add another root node."
-        );
+        assert_eq!("Root node is already present in the tree.", format!("{}", err),);
     }
 
     #[test]

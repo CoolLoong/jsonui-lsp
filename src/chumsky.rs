@@ -13,7 +13,7 @@ pub(crate) enum Token<'a> {
     Colon(SimpleSpan),
     Comma(SimpleSpan),
     Array(SimpleSpan, Vec<Token<'a>>),
-    Controls(SimpleSpan, Vec<Token<'a>>),
+    Object(SimpleSpan, Vec<Token<'a>>),
 }
 
 pub(crate) type ChumskyParser<'a> = Boxed<'a, 'a, &'a str, Vec<Token<'a>>, extra::Err<Rich<'a, char>>>;
@@ -103,30 +103,29 @@ pub(crate) fn parser<'a>() -> ChumskyParser<'a> {
                     .recover_with(skip_then_retry_until(any().ignored(), end())),
             );
 
-        let controls = value
+        let object = value
             .clone()
             .repeated()
             .collect::<Vec<Token<'a>>>()
+            .padded()
             .delimited_by(
                 just('{'),
                 just('}')
                     .ignored()
                     .recover_with(via_parser(end()))
                     .recover_with(skip_then_retry_until(any().ignored(), end())),
-            )
-            .padded_by(text::whitespace())
-            .map_with(|s, e| Token::Controls(e.span(), s));
+            );
 
         choice((
+            just(':').map_with(|_, e| Token::Colon(e.span())),
+            just(',').map_with(|_, e| Token::Comma(e.span())),
             just("true").map_with(|_, e| Token::Bool(e.span(), true)),
             just("false").map_with(|_, e| Token::Bool(e.span(), false)),
-            number,
             string,
-            array,
-            controls,
+            number,
             comment,
-            just(",").map_with(|_, e| Token::Comma(e.span())),
-            just(":").map_with(|_, e| Token::Colon(e.span())),
+            array,
+            object.map_with(|s, e| Token::Object(e.span(), s)),
         ))
         .recover_with(via_parser(nested_delimiters('{', '}', [('[', ']')], |e| Token::Invalid(e))))
         .recover_with(via_parser(nested_delimiters('[', ']', [('{', '}')], |e| Token::Invalid(e))))
@@ -141,13 +140,13 @@ pub(crate) fn parser<'a>() -> ChumskyParser<'a> {
 pub(crate) fn parse<'a>(
     parser: ChumskyParser<'a>,
     input: &'a str,
-) -> Result<Vec<Token<'a>>, Vec<Rich<'a, char>>> {
+) -> Result<((usize, usize), Vec<Token<'a>>), Vec<Rich<'a, char>>> {
     parser.parse(input).into_result().map(|e| {
-        let first_controls = e.into_iter().find(|t| matches!(t, Token::Controls(_, _)));
-        if let Some(Token::Controls(_, v)) = first_controls {
-            v
+        let first_controls = e.into_iter().find(|t| matches!(t, Token::Object(_, _)));
+        if let Some(Token::Object(root_span, v)) = first_controls {
+            ((root_span.start, root_span.end), v)
         } else {
-            vec![]
+            panic!("parse content {} error,cant find root object!", input);
         }
     })
 }
@@ -234,7 +233,7 @@ pub(crate) fn to_map_with_span_ref<'a>(
             }
             Token::Colon(_) => collect = true,
             Token::Array(span, _)
-            | Token::Controls(span, _)
+            | Token::Object(span, _)
             | Token::Num(span, _)
             | Token::Bool(span, _)
                 if collect =>
@@ -337,26 +336,46 @@ mod tests {
 
     use chumsky::prelude::*;
 
-    use super::{parse, parser, to_map, ChumskyParser};
-    use crate::chumsky::{to_number, to_number_ref, Token};
+    use super::{parse, parser, to_map};
+    use crate::chumsky::Token;
 
     const EXAMPLE1: &str = include_str!("../test/achievement_screen.json");
     const VANILLAPACK_DEFINE: &str = include_str!("../resources/vanillapack_define_1.21.40.3.json");
+
     #[test]
-    fn test_parse() {
+    fn test_parse_full_1() {
         let parser = parser();
         let r = parser.parse(EXAMPLE1).into_result();
         match r {
             Ok(r) => {
                 println!("{:?}", r);
                 assert_eq!(2, r.len());
-                assert!(matches!(r.get(1).unwrap(), Token::Controls(_, _)));
+                assert!(matches!(r.get(1).unwrap(), Token::Object(_, _)));
             }
             Err(e) => {
                 panic!("{:?}", e);
             }
         }
     }
+
+    #[test]
+    fn test_parse_full_2() {
+        let parser = parser();
+        let r = parser.parse(VANILLAPACK_DEFINE).into_result();
+        match r {
+            Ok(ref r) => {
+                if let Token::Object(_, ref v) = r[0] {
+                    assert_eq!(863, v.len());
+                } else {
+                    panic!();
+                }
+            }
+            Err(e) => {
+                panic!("{:?}", e);
+            }
+        }
+    }
+
     #[test]
     fn test_parse_2() {
         let parser = parser();
@@ -378,10 +397,70 @@ mod tests {
             Ok(ref r) => {
                 println!("{:?}", r);
                 assert_eq!(1, r.len());
-                if let Token::Controls(_, ref v) = r[0]
+                if let Token::Object(_, ref v) = r[0]
                     && let Token::Str(_, v) = v[0]
                 {
                     assert_eq!("radio_toggle_group", v);
+                } else {
+                    panic!()
+                }
+            }
+            Err(ref e) => {
+                panic!("{:?}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_3() {
+        let parser = parser();
+        let r = parser
+            .parse(
+                r#"
+                {
+                "add_external_server_screen_new@add_external_server_screen": {}
+                }
+                "#,
+            )
+            .into_result();
+        match r {
+            Ok(ref r) => {
+                println!("{:?}", r);
+                assert_eq!(1, r.len());
+                if let Token::Object(_, ref v) = r[0]
+                    && let Token::Object(_, ref v) = v[2]
+                {
+                    assert_eq!(&Vec::<Token<'_>>::new(), v);
+                } else {
+                    panic!()
+                }
+            }
+            Err(ref e) => {
+                panic!("{:?}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_4() {
+        let parser = parser();
+        let r = parser
+            .parse(
+                r#"
+                {
+                "add_external_server_screen_new@add_external_server_screen": [ ]
+                }
+                "#,
+            )
+            .into_result();
+        match r {
+            Ok(ref r) => {
+                println!("{:?}", r);
+                assert_eq!(1, r.len());
+                if let Token::Object(_, ref v) = r[0]
+                    && let Token::Array(_, ref v) = v[2]
+                {
+                    assert_eq!(&Vec::<Token<'_>>::new(), v);
                 } else {
                     panic!()
                 }
@@ -398,7 +477,7 @@ mod tests {
         let r = parse(parser, EXAMPLE1);
 
         match r {
-            Ok(r) => {
+            Ok((_, r)) => {
                 let r = to_map(r);
                 assert!(r.contains_key("namespace"));
                 assert!(r.contains_key("full_progress_bar_icon_base_test"));
