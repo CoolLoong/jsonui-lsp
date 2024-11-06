@@ -317,12 +317,12 @@ where
 {
     /// Display the node.
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        return write!(
+        write!(
             f,
             "{}: {}",
             self.get_node_id(),
             self.get_value().as_ref().cloned().unwrap_or_default()
-        );
+        )
     }
 }
 

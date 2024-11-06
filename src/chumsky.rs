@@ -21,25 +21,23 @@ pub(crate) type ChumskyParser<'a> = Boxed<'a, 'a, &'a str, Vec<Token<'a>>, extra
 pub(crate) fn parser<'a>() -> ChumskyParser<'a> {
     recursive(|value| {
         let digits = text::digits(10).to_slice();
-        let frac = just('.').then(digits.clone());
+        let frac = just('.').then(digits);
         let exp = just('e')
             .or(just('E'))
             .then(one_of("+-").or_not())
-            .then(digits.clone());
+            .then(digits);
         let number = just('-')
             .or_not()
-            .then(digits.clone())
+            .then(digits)
             .then(frac.or_not())
             .then(exp.or_not())
             .to_slice()
             .map_with(|s: &str, e| {
                 Token::Num(
                     e.span(),
-                    s.parse::<f64>().expect(&format!(
-                        "parse number error in {}, value {}.",
+                    s.parse::<f64>().unwrap_or_else(|_| panic!("parse number error in {}, value {}.",
                         e.span(),
-                        s
-                    )),
+                        s)),
                 )
             })
             .padded_by(text::whitespace());
@@ -127,8 +125,8 @@ pub(crate) fn parser<'a>() -> ChumskyParser<'a> {
             array,
             object.map_with(|s, e| Token::Object(e.span(), s)),
         ))
-        .recover_with(via_parser(nested_delimiters('{', '}', [('[', ']')], |e| Token::Invalid(e))))
-        .recover_with(via_parser(nested_delimiters('[', ']', [('{', '}')], |e| Token::Invalid(e))))
+        .recover_with(via_parser(nested_delimiters('{', '}', [('[', ']')], Token::Invalid)))
+        .recover_with(via_parser(nested_delimiters('[', ']', [('{', '}')], Token::Invalid)))
         .recover_with(skip_then_retry_until(any().ignored(), one_of(",]}").ignored()))
         .padded_by(text::whitespace())
     })

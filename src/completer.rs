@@ -160,7 +160,7 @@ fn split_control_name(name: &str, def_namespace: &str) -> (Rc<str>, Rc<str>, Rc<
             part3 = namespace_parts[1];
         }
         1 => {
-            part2 = def_namespace.as_ref();
+            part2 = def_namespace;
             part3 = namespace_parts[0];
         }
         _ => {}
@@ -381,7 +381,7 @@ impl<'a> Completer<'a> {
                     type_n:    Mutex::new(None),
                     variables: Mutex::new(std::collections::HashSet::<Arc<str>>::new()),
                 },
-                loc:    root_span.clone(),
+                loc:    *root_span,
             };
             Self::add_tree_node(&mut tr, &ctx, root, None);
             Self::build_control_tree(&mut tr, tokens, &ctx);
@@ -485,7 +485,7 @@ impl<'a> Completer<'a> {
                 }
             }
         } else {
-            let r = self.vanilla_controls_tabel.get(&extend);
+            let r = self.vanilla_controls_tabel.get(extend);
             if let Some(r) = r {
                 {
                     let type_n = r.type_n.lock().expect("type_n lock error");

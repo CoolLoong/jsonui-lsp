@@ -148,13 +148,13 @@
 
 mod lib {
     pub use std::collections::HashSet;
-    pub use std::rc::Rc;
+    
     pub use std::string::{String, ToString};
     pub use std::sync::Arc;
     pub use std::vec::Vec;
-    pub use std::{format, vec};
+    pub use std::vec;
 
-    pub use self::core::cell::RefCell;
+    
     pub use self::core::clone::Clone;
     pub use self::core::cmp::{Eq, PartialEq};
     pub use self::core::convert::{AsRef, From};
@@ -177,8 +177,8 @@ mod tree;
 pub mod prelude {
     //! A module to re-export the necessary types for the tree data structure.
 
-    pub use super::node::{Node, Nodes};
-    pub use super::tree::{NodeRemovalStrategy, SubTree, TraversalStrategy, Tree};
+    pub use super::node::Node;
+    pub use super::tree::{TraversalStrategy, Tree};
 
     /// Defines the default type for the node id.
     ///

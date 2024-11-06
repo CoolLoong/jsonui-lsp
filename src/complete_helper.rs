@@ -11,17 +11,17 @@ use crate::chumsky::{to_array_ref, to_map_ref, to_number_ref, to_string_ref, Tok
 use crate::completer::{AutoTree, ControlNode};
 use crate::tree_ds::prelude::{AutomatedId, Node};
 
-const ARRAY: &'static str = "Array";
-const OBJECT: &'static str = "Object";
-const BIND: &'static str = "bindings";
-const CONTROLS: &'static str = "controls";
+const ARRAY: &str = "Array";
+const OBJECT: &str = "Object";
+const BIND: &str = "bindings";
+const CONTROLS: &str = "controls";
 
 fn find_neighbors_token<'a>(
     flatted_tokens: &'a Vec<FlattenToken<'a>>,
     index: usize,
 ) -> Vec<Option<&'a FlattenToken<'a>>> {
     let closed_index = flatted_tokens
-        .into_iter()
+        .iter()
         .map(|v| match v.token {
             Token::Invalid(span)
             | Token::Bool(span, _)
@@ -181,7 +181,7 @@ pub(crate) fn normal(
         let neighbors = find_neighbors_token(&result, index);
 
         let default1: &Option<&FlattenToken> = &None;
-        let n1 = neighbors.get(0).unwrap_or(default1);
+        let n1 = neighbors.first().unwrap_or(default1);
         let n2 = neighbors.get(1).unwrap_or(default1);
         let current = neighbors.get(2).unwrap_or(default1);
 
@@ -220,7 +220,7 @@ fn create_value_completion(
     {
         let property = to_map_ref(v);
         if let Some(Token::Array(_, values)) = property.get("values") {
-            for (index, v) in values.into_iter().enumerate() {
+            for (index, v) in values.iter().enumerate() {
                 let v = if let Token::Object(_, v) = v {
                     v
                 } else {
@@ -251,8 +251,7 @@ fn create_value_completion(
                                 HashMap::new()
                             };
                             d.get(&lang.to_string())
-                                .or(d.get("en-us"))
-                                .and_then(|f| Some(to_string_ref(f)))
+                                .or(d.get("en-us")).map(|f| to_string_ref(f))
                         }),
                         detail:      None,
                     }),
@@ -310,14 +309,13 @@ fn create_type_completion(
                         Token::Object(_, v) => to_map_ref(v),
                         _ => HashMap::new(),
                     })
-                    .unwrap_or(HashMap::default());
+                    .unwrap_or_default();
                 result.push(CompletionItem {
                     label: str.to_string(),
                     label_details: Some(CompletionItemLabelDetails {
                         description: des
                             .get(lang.as_ref())
-                            .or(des.get("en-us"))
-                            .and_then(|f| Some(to_string_ref(f))),
+                            .or(des.get("en-us")).map(|f| to_string_ref(f)),
                         ..Default::default()
                     }),
                     kind: Some(CompletionItemKind::TEXT),
