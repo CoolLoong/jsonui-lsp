@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 
 use log::trace;
@@ -49,6 +49,7 @@ pub(crate) struct ExtraInfo {
 
 #[derive(PartialEq, Clone)]
 pub(crate) enum Token {
+    Null(),
     Bool(ExtraInfo, bool),
     Str(ExtraInfo, String),
     Num(ExtraInfo, f64),
@@ -61,6 +62,7 @@ impl Token {
     fn format_tree(&self, indent: usize) -> String {
         let indent_str = "  ".repeat(indent); // Use two spaces for indentation
         match self {
+            Token::Null() => "".to_string(),
             Token::Bool(extra_info, value) => format!("{}Bool({:?}, {})", indent_str, extra_info, value),
             Token::Str(extra_info, string) => format!("{}Str({:?}, {})", indent_str, extra_info, string),
             Token::Num(extra_info, num) => format!("{}Num({:?}, {})", indent_str, extra_info, num),
@@ -171,7 +173,8 @@ impl Lexer {
                 _ => Self::handle_other(ctx, str, i),
             }
         }
-        let r: Vec<Token> = ctx.stack.to_owned().into_iter().collect();
+
+        let r: Vec<Token> = std::mem::take(ctx.stack).into();
         if r.is_empty() {
             trace!("build ast is none");
             None
@@ -307,7 +310,7 @@ impl Lexer {
                             range: (v.range.0, index + 1),
                             path:  v.path.to_vec(),
                         },
-                        Some(tmp_vec.clone()),
+                        Some(std::mem::take(tmp_vec)),
                     ));
                     *ctx.current = ctx.last.clone();
                     return;
@@ -353,7 +356,7 @@ impl Lexer {
                             range: (v.range.0, index + 1),
                             path:  v.path.to_vec(),
                         },
-                        Some(tmp_vec.clone()),
+                        Some(std::mem::take(tmp_vec)),
                     ));
                     *ctx.current = ctx.last.clone();
                     return;
@@ -403,185 +406,151 @@ impl Lexer {
     }
 }
 
-// pub(crate) fn lexer<'a>() -> ChumskyParser<'a> {
-// }
+pub(crate) async fn parse(
+    pos: Option<(usize, usize)>,
+    doc: &Document,
+) -> Option<(ExtraInfo, Vec<Token>)> {
+    let r = Lexer::new().parse(pos, doc).await;
+    if let Some(mut r) = r
+        && let Token::Object(info, v) = std::mem::replace(&mut r[0], Token::Null())
+    {
+        Some((info, v.unwrap()))
+    } else {
+        None
+    }
+}
 
-// pub(crate) fn parse<'a>(
-//     parser: ChumskyParser<'a>,
-//     input: &'a str,
-// ) -> Result<((usize, usize), Vec<Token<'a>>), Vec<Rich<'a, char>>> {
-// }
+pub(crate) fn to_map(tokens: Vec<Token>) -> std::collections::HashMap<String, Token> {
+    let mut key = String::new();
+    let mut collect = false;
+    let mut r = std::collections::HashMap::new();
+    for i in tokens {
+        match i {
+            Token::Str(_, ref v) => {
+                if collect {
+                    r.insert(std::mem::take(&mut key), i);
+                    collect = false;
+                } else {
+                    key.push_str(v.as_str());
+                }
+            }
+            Token::Colon(_) => collect = true,
+            _ if collect => {
+                r.insert(std::mem::take(&mut key), i);
+                collect = false;
+            }
+            _ => {}
+        }
+    }
+    r
+}
 
-// pub(crate) fn to_map(tokens: Vec<Token>) -> std::collections::HashMap<String, Token> {
-//     let mut key = String::new();
-//     let mut collect = false;
-//     let mut r = std::collections::HashMap::new();
-//     for i in tokens {
-//         match i {
-//             Token::Str(_, v) => {
-//                 if collect {
-//                     r.insert(std::mem::take(&mut key), i);
-//                     collect = false;
-//                 } else {
-//                     key.push_str(v);
-//                 }
-//             }
-//             Token::Colon(_) => collect = true,
-//             _ if collect => {
-//                 r.insert(std::mem::take(&mut key), i);
-//                 collect = false;
-//             }
-//             _ => {}
-//         }
-//     }
-//     r
-// }
+pub(crate) fn to_map_ref<'a>(tokens: &'a Vec<Token>) -> std::collections::HashMap<String, &'a Token> {
+    let mut key = String::new();
+    let mut collect = false;
+    let mut r = std::collections::HashMap::new();
+    for i in tokens {
+        match i {
+            Token::Str(_, v) => {
+                if collect {
+                    r.insert(std::mem::take(&mut key), i);
+                    collect = false;
+                } else {
+                    key.push_str(v);
+                }
+            }
+            Token::Colon(_) => collect = true,
+            _ if collect => {
+                r.insert(std::mem::take(&mut key), i);
+                collect = false;
+            }
+            _ => {}
+        }
+    }
+    r
+}
 
-// pub(crate) fn to_map_ref<'a>(
-//     tokens: &'a Vec<Token<'a>>,
-// ) -> std::collections::HashMap<String, &'a Token<'a>> {
-//     let mut key = String::new();
-//     let mut collect = false;
-//     let mut r = std::collections::HashMap::new();
-//     for i in tokens {
-//         match i {
-//             Token::Str(_, v) => {
-//                 if collect {
-//                     r.insert(std::mem::take(&mut key), i);
-//                     collect = false;
-//                 } else {
-//                     key.push_str(v);
-//                 }
-//             }
-//             Token::Colon(_) => collect = true,
-//             _ if collect => {
-//                 r.insert(std::mem::take(&mut key), i);
-//                 collect = false;
-//             }
-//             _ => {}
-//         }
-//     }
-//     r
-// }
+pub(crate) fn to_arc_str_hashset(tokens: &Vec<Token>) -> HashSet<std::sync::Arc<str>> {
+    let mut r = HashSet::new();
+    for i in tokens {
+        if let Token::Str(_, v) = i {
+            r.insert(std::sync::Arc::from(v.as_str()));
+        }
+    }
+    r
+}
 
-// pub(crate) fn to_map_with_span_ref<'a>(
-//     tokens: &'a Vec<Token<'a>>,
-// ) -> std::collections::HashMap<String, ((usize, usize), &'a Token<'a>)> {
-//     let mut key = String::new();
-//     let mut start_span = None;
-//     let mut collect = false;
-//     let mut r = std::collections::HashMap::new();
+pub(crate) fn to_string(token: Token) -> String {
+    if let Token::Str(_, v) = token {
+        v
+    } else {
+        String::new()
+    }
+}
 
-//     for i in tokens {
-//         match i {
-//             Token::Str(span, v) => {
-//                 if collect {
-//                     let start = start_span.expect("Missing key for value in `to_map_with_span_ref`");
-//                     r.insert(std::mem::take(&mut key), collect_v(start, span, i));
-//                     collect = false;
-//                 } else {
-//                     key.push_str(v);
-//                     start_span = Some(span);
-//                 }
-//             }
-//             Token::Colon(_) => collect = true,
-//             Token::Array(span, _)
-//             | Token::Object(span, _)
-//             | Token::Num(span, _)
-//             | Token::Bool(span, _)
-//                 if collect =>
-//             {
-//                 let start = start_span.expect("Missing key for value in `to_map_with_span_ref`");
-//                 r.insert(std::mem::take(&mut key), collect_v(start, span, i));
-//                 collect = false;
-//             }
-//             _ => {}
-//         }
-//     }
-//     r
-// }
+pub(crate) fn to_string_ref<'a>(token: &'a Token) -> String {
+    if let Token::Str(_, v) = token {
+        v.clone()
+    } else {
+        String::new()
+    }
+}
 
-// pub(crate) fn to_arc_str_hashset(tokens: &Vec<Token>) -> HashSet<std::sync::Arc<str>> {
-//     let mut r = HashSet::new();
-//     for i in tokens {
-//         if let Token::Str(_, v) = i {
-//             r.insert(std::sync::Arc::from(*v));
-//         }
-//     }
-//     r
-// }
+pub(crate) fn to_array(token: Token) -> Vec<Token> {
+    if let Token::Array(_, v) = token {
+        v.unwrap()
+    } else {
+        vec![]
+    }
+}
 
-// pub(crate) fn to_string(token: Token) -> String {
-//     if let Token::Str(_, v) = token {
-//         String::from(v)
-//     } else {
-//         String::new()
-//     }
-// }
+pub(crate) fn to_array_ref<'a>(token: &'a Token) -> Option<&'a Vec<Token>> {
+    if let Token::Array(_, v) = token {
+        Some(v.as_ref().unwrap())
+    } else {
+        None
+    }
+}
 
-// pub(crate) fn to_string_ref<'a>(token: &'a Token<'a>) -> String {
-//     if let Token::Str(_, v) = token {
-//         String::from(*v)
-//     } else {
-//         String::new()
-//     }
-// }
+pub(crate) fn to_bool(token: Token) -> bool {
+    if let Token::Bool(_, v) = token {
+        v
+    } else {
+        false
+    }
+}
 
-// pub(crate) fn to_array(token: Token) -> Vec<Token> {
-//     if let Token::Array(_, v) = token {
-//         v
-//     } else {
-//         vec![]
-//     }
-// }
+pub(crate) fn to_bool_ref<'a>(token: &'a Token) -> bool {
+    if let Token::Bool(_, v) = token {
+        *v
+    } else {
+        false
+    }
+}
 
-// pub(crate) fn to_array_ref<'a>(token: &'a Token<'a>) -> Option<&'a Vec<Token<'a>>> {
-//     if let Token::Array(_, v) = token {
-//         Some(v)
-//     } else {
-//         None
-//     }
-// }
+pub(crate) fn to_number(token: Token) -> f64 {
+    if let Token::Num(_, v) = token {
+        v
+    } else {
+        0 as f64
+    }
+}
 
-// pub(crate) fn to_bool(token: Token) -> bool {
-//     if let Token::Bool(_, v) = token {
-//         v
-//     } else {
-//         false
-//     }
-// }
+pub(crate) fn to_number_ref<'a>(token: &'a Token) -> f64 {
+    if let Token::Num(_, v) = token {
+        *v
+    } else {
+        0 as f64
+    }
+}
 
-// pub(crate) fn to_bool_ref<'a>(token: &'a Token<'a>) -> bool {
-//     if let Token::Bool(_, v) = token {
-//         *v
-//     } else {
-//         false
-//     }
-// }
-
-// pub(crate) fn to_number(token: Token) -> f64 {
-//     if let Token::Num(_, v) = token {
-//         v
-//     } else {
-//         0 as f64
-//     }
-// }
-
-// pub(crate) fn to_number_ref<'a>(token: &'a Token<'a>) -> f64 {
-//     if let Token::Num(_, v) = token {
-//         *v
-//     } else {
-//         0 as f64
-//     }
-// }
-
-// #[allow(unused_imports)]
-// pub(crate) mod prelude {
-//     pub(crate) use super::{
-//         parse, parser, to_arc_str_hashset, to_array, to_array_ref, to_bool, to_bool_ref, to_map,
-//         to_map_with_span_ref, to_number, to_number_ref, to_string, to_string_ref, Token,
-//     };
-// }
+#[allow(unused_imports)]
+pub(crate) mod prelude {
+    pub(crate) use super::{
+        parse, to_arc_str_hashset, to_array, to_array_ref, to_bool, to_bool_ref, to_map, to_number,
+        to_number_ref, to_string, to_string_ref, Token,
+    };
+}
 
 #[cfg(test)]
 mod tests {
