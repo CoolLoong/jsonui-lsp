@@ -1,12 +1,13 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
-use std::fmt::{self, format, Display};
+use std::fmt::{self, Display};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{fs, vec};
 
+use chumsky::error::Rich;
 use dashmap::DashMap;
 use log::trace;
 use tower_lsp::lsp_types::{CompletionItem, CompletionParams, DidChangeTextDocumentParams};
@@ -26,6 +27,12 @@ pub(crate) struct ControlNode {
 impl Display for ControlNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ControlNode {{ define: {}, loc: ({}, {}) }}", self.define, self.loc.0, self.loc.1)
+    }
+}
+impl ControlNode {
+    pub(crate) fn get_type(&self) -> Option<String> {
+        let lock = self.define.type_n.lock().unwrap();
+        lock.as_ref().map(|f| f.to_string())
     }
 }
 
@@ -58,7 +65,6 @@ impl PartialEq for ControlDefine {
     }
 }
 impl Eq for ControlDefine {}
-
 impl fmt::Display for ControlDefine {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let type_n = self.type_n.lock().expect("Failed to lock type_n");
@@ -82,12 +88,6 @@ impl fmt::Display for ControlDefine {
         }
     }
 }
-pub struct Completer {
-    pub(crate) trees:       RwLock<HashMap<Arc<str>, AutoTree<ControlNode>>>,
-    documents:              DashMap<u64, Document>,
-    keyword:                HashSet<String>,
-    vanilla_controls_tabel: HashMap<(Arc<str>, Arc<str>), ControlDefine>,
-}
 
 #[derive(Debug)]
 pub(crate) struct BuildTreeContext {
@@ -104,7 +104,6 @@ pub(crate) struct RecursiveSearchContext {
     variables: RefCell<std::collections::HashSet<Arc<str>>>,
     layer:     AtomicUsize,
 }
-
 impl RecursiveSearchContext {
     pub fn new() -> Self {
         RecursiveSearchContext {
@@ -180,16 +179,25 @@ fn extract_prefix(input: &str) -> &str {
     }
 }
 
-impl Completer {
+pub struct Completer<'a> {
+    pub(crate) trees:       RwLock<HashMap<Arc<str>, AutoTree<ControlNode>>>,
+    documents:              DashMap<u64, Document>,
+    keyword:                HashSet<String>,
+    vanilla_controls_tabel: HashMap<(Arc<str>, Arc<str>), ControlDefine>,
+    jsonui_define:          HashMap<String, Token<'a>>,
+}
+impl<'a> Completer<'a> {
     pub fn new(
         keyword: HashSet<String>,
         vanilla_controls_tabel: HashMap<(Arc<str>, Arc<str>), ControlDefine>,
+        jsonui_define: HashMap<String, Token<'a>>,
     ) -> Self {
         Completer {
             trees: RwLock::new(HashMap::new()),
             documents: DashMap::with_shard_amount(2),
             keyword,
             vanilla_controls_tabel,
+            jsonui_define,
         }
     }
 
@@ -204,7 +212,7 @@ impl Completer {
                 let r = crate::chumsky::parse(tokenizer, content.as_ref());
                 match r {
                     Ok(r) => {
-                        if let Some((k, v)) = Self::handle_tokens(r) {
+                        if let Some((k, v)) = Self::handle_tokens(&r) {
                             self.add_tree(k.as_str(), v);
                         }
                     }
@@ -230,58 +238,62 @@ impl Completer {
         let doc = self.documents.get(&id);
         if let Some(doc) = doc {
             let input = doc.get_content().await;
-            self.parse(input.as_ref());
+            let r = self.parse(input.as_ref());
+            match r {
+                Ok(r) => {
+                    if let Some((_, tr)) = Self::handle_tokens(&r) {
+                        self.update_control_tree(&tr);
 
-            let pos = param.text_document_position.position;
-            let index = doc.get_index_from_position(pos).await;
-
-            let index_value;
-            if let Some(index_v) = index {
-                index_value = index_v;
-            } else {
-                trace!("cant get_index_from_position {:?}", pos);
-                return None;
-            }
-
-            let char;
-            {
-                let input_char_index = index_value - 1;
-                if let Some(cr) = doc.get_char(input_char_index).await {
-                    char = cr;
-                } else {
-                    return None;
+                        let pos = param.text_document_position.position;
+                        let index = doc.get_index_from_position(pos).await;
+                        let index_value;
+                        if let Some(index_v) = index {
+                            index_value = index_v;
+                        } else {
+                            trace!("cant get_index_from_position {:?}", pos);
+                            return None;
+                        }
+                        let char;
+                        {
+                            let input_char_index = index_value - 1;
+                            if let Some(cr) = doc.get_char(input_char_index).await {
+                                char = cr;
+                            } else {
+                                return None;
+                            }
+                        }
+                        crate::complete_helper::normal(
+                            index_value,
+                            pos,
+                            char,
+                            lang,
+                            r.1,
+                            &tr,
+                            &self.jsonui_define,
+                        );
+                    }
                 }
-            }
-
-            let tree = self.trees.read().expect("get read lock in complete");
-            if let Some(tr) = tree.get(doc.get_cache_namespace().as_ref()) {
-                // crate::complete_helper::normal(&pos, index_value, char, lang, &doc, &tr)
+                Err(e) => {
+                    trace!("error in new parser{:?}", e)
+                }
             }
         }
         None
     }
 
-    pub(crate) fn update_document(&self, id: u64, param: &DidChangeTextDocumentParams) {
+    pub(crate) async fn update_document(&self, id: u64, param: &DidChangeTextDocumentParams) {
         let doc = self.documents.get(&id);
         if let Some(doc) = doc {
-            doc.apply_change(param);
+            doc.apply_change(param).await;
         }
     }
 
-    pub(crate) fn parse<'a>(&self, input: &'a str) {
+    pub(crate) fn parse<'b>(
+        &self,
+        input: &'b str,
+    ) -> std::result::Result<((usize, usize), Vec<Token<'b>>), Vec<Rich<'b, char>>> {
         let tokenizer = crate::chumsky::parser::<'_>();
-        let r = crate::chumsky::parse(tokenizer, input);
-        match r {
-            Ok(r) => {
-                if let Some((k, v)) = Self::handle_tokens(r) {
-                    self.update_control_tree(&v);
-                    self.add_tree(k.as_str(), v);
-                }
-            }
-            Err(e) => {
-                trace!("error in new parser{:?}", e)
-            }
-        }
+        crate::chumsky::parse(tokenizer, input)
     }
 
     pub(crate) async fn did_open(&self, id: u64, content: Arc<str>) {
@@ -293,7 +305,18 @@ impl Completer {
                 .or_insert_with(|| Document::from(content));
             if !self.contain_tree(np.as_str()) {
                 let input = r.get_content().await;
-                self.parse(input.as_ref());
+                let r = self.parse(input.as_ref());
+                match r {
+                    Ok(r) => {
+                        if let Some((k, v)) = Self::handle_tokens(&r) {
+                            self.update_control_tree(&v);
+                            self.add_tree(k.as_str(), v);
+                        }
+                    }
+                    Err(e) => {
+                        trace!("error in new parser{:?}", e)
+                    }
+                }
             }
         } else {
             trace!("cant find namespace when did_open.")
@@ -337,10 +360,10 @@ impl Completer {
     }
 
     fn handle_tokens(
-        result: ((usize, usize), Vec<Token<'_>>),
+        result: &((usize, usize), Vec<Token<'_>>),
     ) -> Option<(String, Tree<AutomatedId, ControlNode>)> {
         let (root_span, tokens) = result;
-        let np = find_namespace(&tokens);
+        let np = find_namespace(tokens);
         if let Some(np) = np {
             let mut tr: Tree<AutomatedId, ControlNode> =
                 AutoTree::<ControlNode>::new(Option::Some(np.as_str()));
@@ -358,10 +381,10 @@ impl Completer {
                     type_n:    Mutex::new(None),
                     variables: Mutex::new(std::collections::HashSet::<Arc<str>>::new()),
                 },
-                loc:    root_span,
+                loc:    root_span.clone(),
             };
             Self::add_tree_node(&mut tr, &ctx, root, None);
-            Self::build_control_tree(&mut tr, &tokens, &ctx);
+            Self::build_control_tree(&mut tr, tokens, &ctx);
             Some((np, tr))
         } else {
             trace!("cant find namespace from tokens {:?}", &format!("{:?}", tokens)[..100]);

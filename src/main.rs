@@ -2,23 +2,22 @@
 
 mod chumsky;
 mod complete_helper;
+mod completer;
 mod document;
 mod generator;
-mod completer;
 mod path_info;
 mod tree_ds;
 
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use completer::Completer;
 use flexi_logger::{LogSpecification, Logger, LoggerHandle};
 use log::{info, set_max_level, trace};
-use completer::Completer;
 use tokio::fs;
 use tokio::sync::Mutex;
-use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
+use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
@@ -33,15 +32,15 @@ fn hash_uri(url: &Url) -> u64 {
     museair::bfast::hash(url.path().as_bytes(), SEED)
 }
 
-struct Backend {
+struct Backend<'a> {
     client:               Client,
     log:                  Arc<LoggerHandle>,
     lang:                 Mutex<Arc<str>>,
-    pub(crate) completer: Completer,
+    pub(crate) completer: Completer<'a>,
 }
 
 #[tower_lsp::async_trait]
-impl LanguageServer for Backend {
+impl LanguageServer for Backend<'static> {
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
         if let Some(v) = params.settings.get("log").unwrap().get("level") {
             self.client
@@ -270,7 +269,7 @@ impl LanguageServer for Backend {
     }
 }
 
-impl Backend {
+impl Backend<'static> {
     async fn init_workspace(&self, workspace_folders: PathBuf) {
         self.completer.init(&workspace_folders);
     }
@@ -293,7 +292,7 @@ fn extract_keyword_from_json(
     keyword
 }
 
-pub(crate) fn load_completer() -> Completer {
+pub(crate) fn load_completer<'a>() -> Completer<'a> {
     let r = crate::chumsky::parse(crate::chumsky::parser(), VANILLAPACK_DEFINE);
     let vanilla_controls_tabel = match r {
         Ok((_, r)) => {
@@ -369,7 +368,7 @@ pub(crate) fn load_completer() -> Completer {
         "custom",
     ];
     let keyword = extract_keyword_from_json(&keys, &jsonui_define_map);
-    Completer::new(keyword, vanilla_controls_tabel)
+    Completer::new(keyword, vanilla_controls_tabel, jsonui_define_map)
 }
 
 #[tokio::main]
