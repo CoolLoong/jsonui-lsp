@@ -16,8 +16,7 @@ walkdir = "2.3"
 museair = "0.2.0"
 unicode-segmentation = "1.11.0"
 dashmap = { version = "6.1.0" }
-chumsky = "1.0.0-alpha.7"
-thiserror = "1.0.68"
+thiserror = "2.0.0"
 
 [workspace]
 members = ["vanillapack_define_gen"]

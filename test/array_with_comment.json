@@ -1,0 +1,28 @@
+{
+  "namespace": "server_form",
+  "switcher_long_form": {
+    "type": "panel",
+    "size": ["100%", "100%"],
+    "controls": [
+      // Comment2
+      {
+        "t@server_form.t": {}
+      },
+      {
+        "t2@server_form.t2": {}
+      },
+      {
+        "t3@server_form.t3": {}
+      },
+      {
+        "t4@server_form.t4": {}
+      },
+      {
+        "t5@server_form.t5": {}
+      },
+      {
+        "t6@server_form.t6": {}
+      }
+    ]
+  }
+}

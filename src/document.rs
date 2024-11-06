@@ -6,10 +6,10 @@ use unicode_segmentation::UnicodeSegmentation;
 
 #[derive(Debug)]
 pub struct Document {
-    namespace:       String,
-    line_info_cache: Mutex<Vec<LineInfo>>,
-    content_cache:   Mutex<String>,
-    content_chars:   Mutex<Vec<Arc<str>>>,
+    namespace:        String,
+    line_info_cache:  Mutex<Vec<LineInfo>>,
+    content_cache:    Mutex<String>,
+    pub(crate) chars: Mutex<Vec<Arc<str>>>,
 }
 
 #[derive(Debug)]
@@ -27,7 +27,7 @@ impl Document {
             namespace,
             line_info_cache: Self::init_line_info_cache(str.as_ref()),
             content_cache: Mutex::new(content),
-            content_chars: Mutex::new(content_chars),
+            chars: Mutex::new(content_chars),
         }
     }
 
@@ -115,7 +115,7 @@ impl Document {
     }
 
     pub async fn get_boundary_indices(&self, index: usize) -> Option<(usize, usize)> {
-        let content = self.content_chars.lock().await;
+        let content = self.chars.lock().await;
         let (forward, backward) = content.split_at(index);
         // trace!("{:?} {:?}",forward,backward);
         if forward.is_empty() || backward.is_empty() {
@@ -168,7 +168,7 @@ impl Document {
     }
 
     pub async fn get_char(&self, index: usize) -> Option<Arc<str>> {
-        let chars = self.content_chars.lock().await;
+        let chars = self.chars.lock().await;
         if index >= chars.len() {
             None
         } else {
@@ -177,7 +177,7 @@ impl Document {
     }
 
     pub async fn replace_grapheme_range(&self, start_idx: usize, end_idx: usize, replacement: Arc<str>) {
-        let mut chars = self.content_chars.lock().await;
+        let mut chars = self.chars.lock().await;
         if start_idx > end_idx || start_idx > chars.len() || end_idx > chars.len() {
             panic!()
         }
