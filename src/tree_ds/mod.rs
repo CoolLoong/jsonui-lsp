@@ -178,7 +178,7 @@ pub mod prelude {
     //! A module to re-export the necessary types for the tree data structure.
 
     pub use super::node::Node;
-    pub use super::tree::{TraversalStrategy, Tree};
+    pub use super::tree::{TraversalStrategy,NodeRemovalStrategy, Tree};
 
     /// Defines the default type for the node id.
     ///

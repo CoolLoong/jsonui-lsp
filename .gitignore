@@ -7,3 +7,4 @@ dist/
 pnpm-lock.yaml
 Cargo.lock
 .idea
+logs/

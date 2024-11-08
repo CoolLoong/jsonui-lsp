@@ -1,11 +1,7 @@
-/*---------------------------------------------------------------------------------------------
- *  Copyright (c) Microsoft Corporation. All rights reserved.
- *  Licensed under the MIT License. See License.txt in the project root for license information.
- *--------------------------------------------------------------------------------------------*/
-//@ts-check
 "use strict";
 const path = require("path");
-/**@type {import('webpack').Configuration}*/
+
+/** @type {import('webpack').Configuration} */
 const config = {
   target: "node",
   entry: "./client/src/extension.ts",
@@ -13,14 +9,14 @@ const config = {
     path: path.resolve(__dirname, "dist"),
     filename: "extension.js",
     libraryTarget: "commonjs2",
-    devtoolModuleFilenameTemplate: "../[resource-path]"
+    devtoolModuleFilenameTemplate: "../[resource-path]",
   },
   devtool: "source-map",
   externals: {
-    vscode: "commonjs vscode"
+    vscode: "commonjs vscode",
   },
   resolve: {
-    extensions: [".ts", ".js"]
+    extensions: [".ts", ".js"],
   },
   module: {
     rules: [
@@ -29,11 +25,14 @@ const config = {
         exclude: /node_modules/,
         use: [
           {
-            loader: "ts-loader"
-          }
-        ]
-      }
-    ]
-  }
+            loader: "ts-loader",
+          },
+        ],
+      },
+    ],
+  },
+  cache: {
+    type: 'filesystem',
+  },
 };
 module.exports = config;

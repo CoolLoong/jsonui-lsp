@@ -20,13 +20,12 @@ pub struct LineInfo {
 
 impl Document {
     pub fn from(str: Arc<str>) -> Self {
-        let content: String = str.chars().collect();
-        let content_chars: Vec<Arc<str>> = content.graphemes(true).map(Arc::from).collect();
+        let content_chars: Vec<Arc<str>> = str.graphemes(true).map(Arc::from).collect();
         let namespace = Self::get_namespace(str.clone()).unwrap_or("unknown_namespace".to_string());
         Self {
             namespace,
             line_info_cache: Self::init_line_info_cache(str.as_ref()),
-            content_cache: Mutex::new(content),
+            content_cache: Mutex::new(str.to_string()),
             chars: Mutex::new(content_chars),
         }
     }
@@ -274,7 +273,7 @@ mod tests {
 
     use super::*;
 
-    const EXAMPLE1: &str = include_str!("../test/achievement_screen.json");
+    const EXAMPLE1: &str = include_str!("../test/achievement.json");
 
     #[tokio::test]
     async fn test_apply_change() {

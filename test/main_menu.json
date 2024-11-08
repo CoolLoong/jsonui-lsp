@@ -1,0 +1,239 @@
+{
+  "namespace": "main_menu",
+  "main_panel@common_modal_ui.main_panel": {
+    "$top_content_texture": "textures/ui/starsmenu/realms/border_cell2",
+    "$main_content": "main_menu.main_content",
+    "$main_content_size": ["100%", "100%"],
+    "$modal_size": ["100%", "100%"],
+    "$return_button": false
+  },
+  "main_content@cc.img": {
+    "texture": "textures/ui/starsmenu/realms/border_cell3",
+    "size": ["100%", "100%"],
+    "controls": [
+      {
+        "items@main_menu.items": {}
+      }
+    ]
+  },
+  "items": {
+    "type": "stack_panel",
+    "orientation": "horizontal",
+    "size": ["88%", "39%x"],
+    "controls": [
+      { "@cc.p": { "size": [10, 0] } },
+      { "1@main_menu.items_1": {} },
+      // { "@cc.p": { "size": [10, 0] } },
+      { "2@main_menu.items_2": {} }
+    ]
+  },
+  "items_1": {
+    "type": "stack_panel",
+    "orientation": "vertical",
+    "size": ["50%", "100%"],
+    "controls": [
+      {
+        "line1": {
+          "type": "stack_panel",
+          "orientation": "horizontal",
+          "size": ["100%", "33.33%"],
+          "collection_name": "form_buttons",
+          "controls": [
+            {
+              "0@main_menu.button1": {}
+            },
+            {
+              "1@main_menu.button2": {}
+            }
+          ]
+        }
+      },
+      {
+        "line2": {
+          "type": "stack_panel",
+          "size": ["100%", "33.33%"],
+          "orientation": "horizontal",
+          "collection_name": "form_buttons",
+          "controls": [
+            {
+              "3@button3": {}
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "items_2": {
+    "type": "stack_panel",
+    "size": ["50%", "100%"],
+    "controls": [
+      {
+        "ad@main_menu.ad": {}
+      }
+    ]
+  },
+  "button1@main_menu.button": {
+    "size": ["33.33%", "100%"],
+    "$button_text": "Teleport",
+    "$index": 0,
+    "$normal_image": "textures/ui/starsmenu/main_menu/01",
+    "$pressed_image": "textures/ui/starsmenu/main_menu/01_pressed",
+    "$hover_image": "textures/ui/starsmenu/main_menu/01_pressed"
+  },
+  "button2@main_menu.button": {
+    "size": ["33.33%", "100%"],
+    "$index": 1,
+    "$normal_image": "textures/ui/starsmenu/main_menu/02",
+    "$pressed_image": "textures/ui/starsmenu/main_menu/02_pressed",
+    "$hover_image": "textures/ui/starsmenu/main_menu/02_pressed",
+    "$icon_texture": "textures/ui/starsmenu/main_menu/gear",
+
+    "$icon_size": [16, 16],
+    "$icon_offset": ["7%", 0],
+    "$icon_anchor": "left_middle",
+    "$button_text": "Settings",
+    "$button_text_offset": ["5%+18px", 0],
+    "$button_text_anchor": "left_middle"
+  },
+  "button3@main_menu.button": {
+    "size": ["66.66%", "100%"],
+    "$button_text": "Realms",
+    "$index": 2,
+
+    "$normal_image": "textures/ui/starsmenu/main_menu/03",
+    "$pressed_image": "textures/ui/starsmenu/main_menu/03_pressed",
+    "$hover_image": "textures/ui/starsmenu/main_menu/03_pressed",
+    "$icon_texture": ""
+  },
+  "button4@main_menu.fake_button": {
+    "size": ["100%-2px", "100%"],
+    "$button_text": "",
+    "$normal_image": "textures/ui/starsmenu/main_menu/adverties",
+    "$pressed_image": "textures/ui/starsmenu/main_menu/adverties",
+    "$hover_image": "textures/ui/starsmenu/main_menu/adverties",
+    "$outline": true
+  },
+  "ad": {
+    "type": "panel",
+    "size": ["100%", "66.67%"],
+    "controls": [
+      {
+        "button4@main_menu.button4": {}
+      }
+    ]
+  },
+  "button@cc.icon_button": {
+    "collection_index": "$index",
+    "$button_text_font_type": "MinecraftTen",
+    "$button_text": "default",
+    "$button_text_offset": [0, 0],
+
+    "$size": ["100%", "100%"],
+    "$outer_size": ["100%", "100%"],
+    "$pressed_texture_offset": ["100%", "100%"],
+    "$pressed_button_name": "button.form_button_click",
+    "$button_panel": "main_menu.tab_panel",
+    "bindings": [
+      {
+        "binding_type": "collection_details",
+        "binding_collection_name": "form_buttons"
+      }
+    ]
+  },
+  "fake_button@cc.icon_button": {
+    "$button_text_font_type": "MinecraftTen",
+    "$button_text": "default",
+    "$button_text_offset": [0, 0],
+
+    "$size": ["100%", "100%"],
+    "$outer_size": ["100%", "100%"],
+    "$pressed_texture_offset": ["100%", "100%"],
+    "$pressed_button_name": "",
+    "$button_panel": "main_menu.tab_panel",
+    "bindings": [
+      {
+        "binding_type": "collection_details",
+        "binding_collection_name": "form_buttons"
+      }
+    ]
+  },
+  "tab_panel@cc.p": {
+    "$icon_texture|default": "",
+    "$icon_size|default": [18, 18],
+    "$icon_offset|default": ["-40%", 0],
+    "$icon_anchor|default": "center",
+    "$icon_bindings|default": [],
+    "$icon_controls|default": [],
+    "$outline|default": false,
+    "$button_text_bindings|default": [],
+    "$button_text_font_scale_factor|default": 1,
+    "$button_text_font_type|default": "default",
+    "propagate_alpha": true,
+    "controls": [
+      {
+        "outer_panel@cc.p": {
+          "controls": [
+            {
+              "texture@cc.img": {
+                "controls": [
+                  {
+                    "icon@cc.img": {
+                      "ignored": "($icon_texture = '')",
+                      "size": "$icon_size",
+                      "anchor_from": "$icon_anchor",
+                      "anchor_to": "$icon_anchor",
+                      "offset": "$icon_offset",
+                      "texture": "$icon_texture",
+                      "bindings": "$icon_bindings",
+                      "controls": "$icon_controls"
+                    }
+                  },
+                  {
+                    "text@cc.l": {
+                      "font_scale_factor": "$button_text_font_scale_factor",
+                      "font_type": "$button_text_font_type",
+                      "bindings": "$button_text_bindings",
+                      "shadow": "$button_text_shadow",
+                      "offset": "$button_text_offset_holder",
+                      "layer": 3,
+                      "color": "$button_text_color",
+                      "text": "$button_text",
+                      "text_alignment": "left",
+                      "anchor_from": "$button_text_anchor",
+                      "anchor_to": "$button_text_anchor"
+                    }
+                  },
+                  {
+                    "gamepad_outline@cc.img": {
+                      "allow_clipping": false,
+                      "visible": "($outline and ($is_hover_state or $is_checked_state))",
+                      "texture": "textures/ui/starsmenu/common/outline",
+                      "layer": 9,
+                      "size": ["100% + 1px", "100% + 1px"]
+                    }
+                  },
+                  {
+                    "gamepad_outline_black@cc.img": {
+                      "allow_clipping": false,
+                      "visible": "($outline and (not ($is_hover_state or $is_checked_state)))",
+                      "texture": "textures/ui/starsmenu/common/outline",
+                      "color": "black",
+                      "layer": 9,
+                      "size": ["100% + 1px", "100% + 1px"]
+                    }
+                  }
+                ],
+                "texture": "$texture",
+                "layer": 1,
+                "alpha": "$texture_alpha",
+                "size": "$texture_size"
+              }
+            }
+          ],
+          "size": "$outer_size"
+        }
+      }
+    ],
+    "alpha": "$button_alpha"
+  }
+}
