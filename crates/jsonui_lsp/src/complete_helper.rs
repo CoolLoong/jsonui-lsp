@@ -12,10 +12,182 @@ use crate::document::Document;
 use crate::lexer::prelude::*;
 use crate::tree_ds::prelude::{AutomatedId, Node};
 
-const ARRAY: &str = "Array";
-const OBJECT: &str = "Object";
 const BIND: &str = "bindings";
 const CONTROLS: &str = "controls";
+
+pub(crate) async fn color(doc: &Document, tokens: &Vec<Token>) -> Option<Vec<ColorInformation>> {
+    let mut color_infos = Vec::new();
+    let tokens = flatten_tokens(tokens);
+    let mut iter = tokens.iter();
+    while let Some(color_v) = iter
+        .by_ref()
+        .skip_while(|r| !matches!(r, Token::Str(_, v) if v.as_str() == "color"))
+        .nth(2)
+    {
+        let pos = color_v.pos();
+        if let (Some(left_v), Some(right_v)) =
+            (doc.get_position_from_index(pos.0).await, doc.get_position_from_index(pos.1).await)
+        {
+            if let Some(color) = from_color_value_to_color_arr(color_v) {
+                color_infos.push(ColorInformation {
+                    range: Range {
+                        start: left_v,
+                        end:   right_v,
+                    },
+                    color,
+                });
+            }
+        }
+    }
+    if color_infos.is_empty() {
+        None
+    } else {
+        Some(color_infos)
+    }
+}
+
+pub(crate) fn normal(
+    completer: &Completer,
+    index: usize,
+    boundary_indices: (usize, usize),
+    pos: Position,
+    char: Arc<str>,
+    lang: Arc<str>,
+    tokens: &Vec<Token>,
+    tree: &AutoTree<ControlNode>,
+    define_map: &HashMap<String, Token>,
+) -> Option<Vec<CompletionItem>> {
+    let root = tree.get_root_node().expect("cant get root node");
+    let r = find_closest_node(tree, &root, index);
+    if let Some(r) = r {
+        let n = tree.get_node_by_id(&r).unwrap();
+
+        let result = flatten_tokens(tokens);
+        let boundary = boundary_tokens(&result, boundary_indices);
+        let neighbors = find_neighbors_token(&result, index);
+
+        let default1: &Option<&Token> = &None;
+        let n1 = neighbors.first().unwrap_or(default1);
+        let n2 = neighbors.get(1).unwrap_or(default1);
+        let current = neighbors.get(2).unwrap_or(default1);
+        let n3 = neighbors.get(3).unwrap_or(default1);
+        let n4 = neighbors.get(4).unwrap_or(default1);
+        let r = boundary.first();
+
+        if let Some(Token::Str(_, str)) = r {
+            trace!(
+                "input |n1 {:?}| |n2 {:?}| |current {:?}| |n3 {:?}| |n4 {:?}| char '{}'",
+                n1,
+                n2,
+                current,
+                n3,
+                n4,
+                char
+            );
+            match str.as_str() {
+                CONTROLS => {}
+                BIND if char.as_ref() == "\""
+                    && matches!(current, Some(_))
+                    && matches!(current.unwrap(), Token::Str(_, str) if str.is_empty()) =>
+                {
+                    trace!("create_bindings_type_completion");
+                    let inputs =
+                        create_binding_type_input(index, boundary, define_map, current.unwrap());
+                    return create_type_completion(inputs, pos, lang, define_map);
+                }
+                _ => {
+                    if let Some(Token::Str(_, str)) = n1
+                        && let Some(Token::Colon(_)) = n2
+                        && let Some(Token::Str(_, v)) = current
+                        && v.is_empty()
+                    {
+                        trace!("create_value_completion");
+                        return create_value_completion(pos, n3, char, lang, str, define_map);
+                    } else if let Some(Token::Str(_, str)) = n2
+                        && let Some(Token::Colon(_)) = current
+                    {
+                        trace!("create_value_completion");
+                        return create_value_completion(pos, n3, char, lang, str, define_map);
+                    } else if char.as_ref() == "\""
+                        && let Some(Token::Str(_, str)) = current
+                        && str.is_empty()
+                    {
+                        trace!("create_type_completion");
+                        let node = n.get_value().unwrap();
+                        let r = if let Some(r) = node.get_type() {
+                            r
+                        } else if let Some(extend) = node.define.extend
+                            && let Some((r, _)) = completer.find_extend_value(&extend)
+                        {
+                            r.to_string()
+                        } else {
+                            trace!("cant find type_completion!");
+                            return None;
+                        };
+                        let inputs = create_type_input(&r, define_map);
+                        return create_type_completion(inputs, pos, lang, define_map);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn create_type_input<'a>(type_n: &'a String, define_map: &'a HashMap<String, Token>) -> Vec<&'a Token> {
+    let mut inputs: Vec<&Token> = vec![];
+    if let Some(Token::Array(_, arr)) = define_map.get(type_n) {
+        inputs.extend(arr.as_ref().unwrap());
+    }
+    inputs.extend(to_array_ref(define_map.get("common").unwrap()).unwrap());
+    inputs
+}
+
+fn create_binding_type_input<'a>(
+    index: usize,
+    boundary: Vec<&'a Token>,
+    define_map: &'a HashMap<String, Token>,
+    current: &'a Token,
+) -> Vec<&'a Token> {
+    let mut r = vec![];
+    let bindings = boundary.iter().filter(|f| matches!(f, Token::Object(_, _)));
+    let mut in_binding = false;
+    for binding in bindings {
+        if let Token::Object(pos, Some(binding)) = binding {
+            let cpos = current.pos();
+            if pos.0 <= index && index <= pos.1 {
+                in_binding = true;
+            }
+            if pos.0 <= cpos.0 && cpos.1 <= pos.1 {
+                trace!("find binding {:?}", binding);
+                if let Some(Token::Str(_, type_v)) =
+                    binding.iter().enumerate().find_map(|(index, token)| {
+                        if let Token::Str(_, s) = token {
+                            if s.as_str() == "binding_type" && index + 2 < binding.len() {
+                                Some(&binding[index + 2])
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                {
+                    if let Some(Token::Array(_, Some(arr))) = define_map.get(type_v) {
+                        r.extend(arr);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    if let Some(Token::Array(_, Some(arr))) = define_map.get("bindings_properties")
+        && in_binding
+    {
+        r.extend(arr);
+    }
+    r
+}
 
 fn find_neighbors_token<'a>(flatted_tokens: &Vec<&'a Token>, index: usize) -> Vec<Option<&'a Token>> {
     let closed_index = flatted_tokens
@@ -174,81 +346,81 @@ pub(crate) fn from_color_value_to_color_arr(v: &Token) -> Option<Color> {
     if let Token::Str(_, color_str) = v {
         return match color_str.as_ref() {
             "white" => Some(Color {
-                red: 1.0,
+                red:   1.0,
                 green: 1.0,
-                blue: 1.0,
+                blue:  1.0,
                 alpha: 1.0,
             }),
             "silver" => Some(Color {
-                red: 0.776,
+                red:   0.776,
                 green: 0.776,
-                blue: 0.776,
+                blue:  0.776,
                 alpha: 1.0,
             }),
             "gray grey" => Some(Color {
-                red: 0.333,
+                red:   0.333,
                 green: 0.333,
-                blue: 0.333,
+                blue:  0.333,
                 alpha: 1.0,
             }),
             "black" => Some(Color {
-                red: 0.0,
+                red:   0.0,
                 green: 0.0,
-                blue: 0.0,
+                blue:  0.0,
                 alpha: 1.0,
             }),
             "red" => Some(Color {
-                red: 1.0,
+                red:   1.0,
                 green: 0.333,
-                blue: 0.333,
+                blue:  0.333,
                 alpha: 1.0,
             }),
             "green" => Some(Color {
-                red: 0.333,
+                red:   0.333,
                 green: 1.0,
-                blue: 0.333,
+                blue:  0.333,
                 alpha: 1.0,
             }),
             "yellow" => Some(Color {
-                red: 1.0,
+                red:   1.0,
                 green: 1.0,
-                blue: 0.333,
+                blue:  0.333,
                 alpha: 1.0,
             }),
             "brown" => Some(Color {
-                red: 0.706,
+                red:   0.706,
                 green: 0.408,
-                blue: 0.302,
+                blue:  0.302,
                 alpha: 1.0,
             }),
             "cyan" => Some(Color {
-                red: 0.0,
+                red:   0.0,
                 green: 0.667,
-                blue: 0.667,
+                blue:  0.667,
                 alpha: 1.0,
             }),
             "blue" => Some(Color {
-                red: 0.333,
+                red:   0.333,
                 green: 0.333,
-                blue: 1.0,
+                blue:  1.0,
                 alpha: 1.0,
             }),
             "orange" => Some(Color {
-                red: 1.0,
+                red:   1.0,
                 green: 0.667,
-                blue: 0.0,
+                blue:  0.0,
                 alpha: 1.0,
             }),
             "purple" => Some(Color {
-                red: 1.0,
+                red:   1.0,
                 green: 0.333,
-                blue: 1.0,
+                blue:  1.0,
                 alpha: 1.0,
             }),
             "nil" => Some(Color {
-                red: 1.0,
+                red:   1.0,
                 green: 1.0,
-                blue: 1.0,
+                blue:  1.0,
                 alpha: 0.0,
             }),
             _ => None,
@@ -271,121 +443,18 @@ pub(crate) fn from_color_value_to_color_arr(v: &Token) -> Option<Color> {
                 && v4 <= 1.0
             {
                 return Some(Color {
-                    red: v1,
+                    red:   v1,
                     green: v2,
-                    blue: v3,
+                    blue:  v3,
                     alpha: v4,
                 });
             } else {
                 return Some(Color {
-                    red: v1,
+                    red:   v1,
                     green: v2,
-                    blue: v3,
+                    blue:  v3,
                     alpha: 1.0,
                 });
-            }
-        }
-    }
-    None
-}
-
-pub(crate) async fn color(doc: &Document, tokens: &Vec<Token>) -> Option<Vec<ColorInformation>> {
-    let mut color_infos = Vec::new();
-    let tokens = flatten_tokens(tokens);
-    let mut iter = tokens.iter();
-    while let Some(color_v) = iter
-        .by_ref()
-        .skip_while(|r| !matches!(r, Token::Str(_, v) if v.as_str() == "color"))
-        .nth(2)
-    {
-        let pos = color_v.pos();
-        if let (Some(left_v), Some(right_v)) =
-            (doc.get_position_from_index(pos.0).await, doc.get_position_from_index(pos.1).await)
-        {
-            if let Some(color) = from_color_value_to_color_arr(color_v) {
-                color_infos.push(ColorInformation {
-                    range: Range {
-                        start: left_v,
-                        end: right_v,
-                    },
-                    color,
-                });
-            }
-        }
-    }
-    if color_infos.is_empty() {
-        None
-    } else {
-        Some(color_infos)
-    }
-}
-
-pub(crate) fn normal(
-    completer: &Completer,
-    index: usize,
-    boundary_indices: (usize, usize),
-    pos: Position,
-    char: Arc<str>,
-    lang: Arc<str>,
-    tokens: &Vec<Token>,
-    tree: &AutoTree<ControlNode>,
-    define_map: &HashMap<String, Token>,
-) -> Option<Vec<CompletionItem>> {
-    trace!("handle complete normal: ");
-
-    let root = tree.get_root_node().expect("cant get root node");
-    let r = find_closest_node(tree, &root, index);
-    if let Some(r) = r {
-        let n = tree.get_node_by_id(&r).unwrap();
-
-        let result = flatten_tokens(tokens);
-        let boundary = boundary_tokens(&result, boundary_indices);
-        let neighbors = find_neighbors_token(&result, index);
-
-        let default1: &Option<&Token> = &None;
-        let n1 = neighbors.first().unwrap_or(default1);
-        let n2 = neighbors.get(1).unwrap_or(default1);
-        let current = neighbors.get(2).unwrap_or(default1);
-        let n3 = neighbors.get(3).unwrap_or(default1);
-        let r = boundary.first();
-
-        if let Some(Token::Str(_, str)) = r {
-            match str.as_str() {
-                CONTROLS => {}
-                BIND => {}
-                _ => {
-                    trace!("input |n1 {:?}| |n2 {:?}| |current {:?}| char '{}'", n1, n2, current, char);
-                    if let Some(Token::Str(_, str)) = n1
-                        && let Some(Token::Colon(_)) = n2
-                        && let Some(Token::Str(_, v)) = current
-                        && v.is_empty()
-                    {
-                        trace!("create_value_completion");
-                        return create_value_completion(pos, n3, char, lang, str, define_map);
-                    } else if let Some(Token::Str(_, str)) = n2
-                        && let Some(Token::Colon(_)) = current
-                    {
-                        trace!("create_value_completion");
-                        return create_value_completion(pos, n3, char, lang, str, define_map);
-                    } else if char.as_ref() == "\""
-                        && let Some(Token::Str(_, str)) = current
-                        && str.is_empty()
-                    {
-                        trace!("create_type_completion");
-                        let node = n.get_value().unwrap();
-                        let r = if let Some(r) = node.get_type() {
-                            r
-                        } else if let Some(extend) = node.define.extend
-                            && let Some((r, _)) = completer.find_extend_value(&extend)
-                        {
-                            r.to_string()
-                        } else {
-                            trace!("cant find type_completion!");
-                            return None;
-                        };
-                        return create_type_completion(r, pos, lang, define_map);
-                    }
-                }
             }
         }
     }
@@ -424,7 +493,7 @@ fn create_value_completion(
                 if char.as_ref() == "\""
                     && let Some(format) = insert_text_format
                     && ((format == InsertTextFormat::PLAIN_TEXT && kind.is_some())
-                    || format == InsertTextFormat::SNIPPET)
+                        || format == InsertTextFormat::SNIPPET)
                 {
                     continue;
                 }
@@ -440,7 +509,6 @@ fn create_value_completion(
                 let mut insert_text = None;
                 let mut text_edit = None;
                 if is_colon {
-                    trace!("colon");
                     insert_text = value.get("insert_text").or(value.get("label")).map(|k| {
                         let fill = to_string_ref(k);
                         if needs_quotes {
@@ -452,14 +520,13 @@ fn create_value_completion(
                         }
                     });
                 } else if kind.is_none() {
-                    trace!("kind none");
                     text_edit = value.get("insert_text").or(value.get("label")).map(|k| {
                         let fill = to_string_ref(k);
                         CompletionTextEdit::Edit(TextEdit {
-                            range: Range {
+                            range:    Range {
                                 start: pos,
-                                end: Position {
-                                    line: pos.line,
+                                end:   Position {
+                                    line:      pos.line,
                                     character: pos.character + 1,
                                 },
                             },
@@ -484,7 +551,7 @@ fn create_value_completion(
                                 .or(d.get("en-us"))
                                 .map(|f| to_string_ref(f))
                         }),
-                        detail: None,
+                        detail:      None,
                     }),
                     kind,
                     insert_text_format,
@@ -506,19 +573,12 @@ fn create_value_completion(
 }
 
 fn create_type_completion(
-    type_n: String,
+    inputs: Vec<&Token>,
     pos: Position,
     lang: Arc<str>,
     define_map: &HashMap<String, Token>,
 ) -> Option<Vec<CompletionItem>> {
     let mut result = Vec::new();
-
-    let mut inputs: Vec<&Token> = vec![];
-    if let Some(Token::Array(_, arr)) = define_map.get(&type_n) {
-        inputs.extend(arr.as_ref().unwrap());
-    }
-    inputs.extend(to_array_ref(define_map.get("common").unwrap()).unwrap());
-
     for (index, av) in inputs.into_iter().enumerate() {
         if let Token::Str(_, str) = av {
             if let Some(Token::Object(_, v)) = define_map.get(&str.to_string()) {
@@ -541,13 +601,13 @@ fn create_type_completion(
                     }),
                     kind: Some(CompletionItemKind::TEXT),
                     text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                        range: Range {
+                        range:    Range {
                             start: Position {
-                                line: pos.line,
+                                line:      pos.line,
                                 character: pos.character,
                             },
-                            end: Position {
-                                line: pos.line,
+                            end:   Position {
+                                line:      pos.line,
                                 character: pos.character + 1,
                             },
                         },
@@ -587,7 +647,7 @@ mod tests {
         let r = super::flatten_tokens(&r);
         let index = doc
             .get_index_from_position(Position {
-                line: 32,
+                line:      32,
                 character: 23,
             })
             .await;
@@ -604,7 +664,6 @@ mod tests {
         let path = PathBuf::from("test");
         assert!(path.exists());
 
-        
         crate::tests::setup_logger();
         p.init(&path).await;
 

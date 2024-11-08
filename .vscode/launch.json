@@ -14,7 +14,7 @@
       ],
       "preLaunchTask": "buildall",
       "env": {
-        "SERVER_PATH": "${workspaceFolder}/target/debug/jsonui-lsp"
+        "SERVER_PATH": "${workspaceFolder}/target/debug/jsonui_lsp"
       }
     }
   ],

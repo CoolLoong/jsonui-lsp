@@ -209,7 +209,7 @@ impl Lexer {
 
         while let Some(s) = ctx.current() {
             let cr = s.as_ref();
-            
+            #[cfg(feature = "debug-parse")]
             trace!("['{}', state {:?}]", cr, ctx.current);
             match cr.into() {
                 _ if Self::is_escape(ctx) => Self::handle_escape_char(ctx, cr),
@@ -638,9 +638,6 @@ pub(crate) mod prelude {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-
-    use flexi_logger::{FileSpec, LogSpecification, Logger, LoggerHandle, WriteMode};
-
 
     use crate::document::Document;
     use crate::lexer::{to_num_array, Lexer, Token};

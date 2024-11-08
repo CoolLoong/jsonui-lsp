@@ -116,7 +116,8 @@ impl Document {
     pub async fn get_boundary_indices(&self, index: usize) -> Option<(usize, usize)> {
         let content = self.chars.lock().await;
         let (forward, backward) = content.split_at(index);
-        // trace!("{:?} {:?}",forward,backward);
+        #[cfg(feature = "debug-parse")]
+        trace!("before {:?} | after {:?}",forward, backward);
         if forward.is_empty() || backward.is_empty() {
             return None;
         }
@@ -229,7 +230,6 @@ impl Document {
     }
 
     fn handle_boundary_char<'a>(char: &'a str, boundary_stacks: &mut Vec<Vec<&'a str>>) {
-        // trace!("{}",char);
         let (current_index, opposite_index) = match char {
             "{" => (0, 1),
             "}" => (1, 0),
