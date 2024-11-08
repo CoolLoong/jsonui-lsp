@@ -8,7 +8,7 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ### Added
 
-- Implement variable navigation and IntelliSense
+- Implement variable IntelliSense
 
 ### Changed
 
