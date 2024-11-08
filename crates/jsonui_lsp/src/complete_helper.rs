@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use log::trace;
@@ -102,12 +102,30 @@ pub(crate) fn normal(
                         && v.is_empty()
                     {
                         trace!("create_value_completion");
-                        return create_value_completion(pos, n3, char, lang, str, define_map);
+                        let extra_values = create_variables_completion(completer, n);
+                        return create_value_completion(
+                            pos,
+                            n3,
+                            char,
+                            lang,
+                            str,
+                            define_map,
+                            &extra_values,
+                        );
                     } else if let Some(Token::Str(_, str)) = n2
                         && let Some(Token::Colon(_)) = current
                     {
                         trace!("create_value_completion");
-                        return create_value_completion(pos, n3, char, lang, str, define_map);
+                        let extra_values = create_variables_completion(completer, n);
+                        return create_value_completion(
+                            pos,
+                            n3,
+                            char,
+                            lang,
+                            str,
+                            define_map,
+                            &extra_values,
+                        );
                     } else if char.as_ref() == "\""
                         && let Some(Token::Str(_, str)) = current
                         && str.is_empty()
@@ -187,6 +205,24 @@ fn create_binding_type_input<'a>(
         r.extend(arr);
     }
     r
+}
+
+fn create_variables_completion(
+    completer: &Completer,
+    n: Node<AutomatedId, ControlNode>,
+) -> std::collections::HashSet<Arc<str>> {
+    if let Some(v) = n.get_value()
+        && let Some(extend) = &v.define.extend
+    {
+        let extend_v = completer.find_extend_value(&extend);
+        if let Some(extend_v) = extend_v {
+            let vars = v.define.variables.lock().unwrap();
+            let mut r = vars.clone();
+            r.extend(extend_v.1);
+            return r;
+        }
+    }
+    HashSet::default()
 }
 
 fn find_neighbors_token<'a>(flatted_tokens: &Vec<&'a Token>, index: usize) -> Vec<Option<&'a Token>> {
@@ -468,8 +504,17 @@ fn create_value_completion(
     lang: Arc<str>,
     property: &str,
     define_map: &HashMap<String, Token>,
+    extra_values: &std::collections::HashSet<Arc<str>>,
 ) -> Option<Vec<CompletionItem>> {
     let mut result = Vec::new();
+    let c = char.as_ref();
+    let is_colon = c == ":";
+    let suffix = if matches!(n3, Some(Token::Comma(_))) {
+        ""
+    } else {
+        ","
+    };
+
     if let Some(v) = define_map.get(property)
         && let Token::Object(_, v) = v
     {
@@ -498,14 +543,7 @@ fn create_value_completion(
                     continue;
                 }
 
-                let c = char.as_ref();
-                let is_colon = c == ":";
                 let needs_quotes = c == ":" && insert_text_format.is_none();
-                let suffix = if matches!(n3, Some(Token::Comma(_))) {
-                    ""
-                } else {
-                    ","
-                };
                 let mut insert_text = None;
                 let mut text_edit = None;
                 if is_colon {
@@ -563,6 +601,40 @@ fn create_value_completion(
                 })
             }
         }
+    }
+
+    //completion variables
+    for i in extra_values {
+        let mut insert_text = None;
+        let mut text_edit = None;
+        if is_colon {
+            insert_text = Some(format!(" \"{}\"{}", i.to_string(), suffix))
+        } else {
+            text_edit = Some(CompletionTextEdit::Edit(TextEdit {
+                range:    Range {
+                    start: pos,
+                    end:   Position {
+                        line:      pos.line,
+                        character: pos.character + 1,
+                    },
+                },
+                new_text: format!("{}\"{}", i.to_string(), suffix),
+            }))
+        }
+        result.push(CompletionItem {
+            label: i.to_string(),
+            label_details: Some(CompletionItemLabelDetails {
+                description: Some("var".to_string()),
+                detail:      None,
+            }),
+            kind: None,
+            insert_text_format: None,
+            insert_text,
+            text_edit,
+            preselect: Some(true),
+            sort_text: Some("999".to_string()),
+            ..Default::default()
+        })
     }
 
     if result.is_empty() {
