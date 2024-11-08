@@ -8,12 +8,11 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex, RwLock};
 use std::{fs, vec};
 
-use dashmap::mapref::one::Ref;
 use dashmap::DashMap;
 use lasso::Spur;
 use log::trace;
 use tower_lsp::lsp_types::{
-    ColorInformation, CompletionItem, CompletionParams, DidChangeTextDocumentParams, DocumentColorParams,
+    ColorInformation, CompletionItem, CompletionParams, DidChangeTextDocumentParams,
 };
 use walkdir::WalkDir;
 
@@ -56,11 +55,7 @@ impl PooledControlDefine {
         } else {
             None
         };
-        let type_n = if let Some(v) = &self.type_n {
-            Some(Arc::from(resolver.resolve(v)))
-        } else {
-            None
-        };
+        let type_n = self.type_n.as_ref().map(|v| Arc::from(resolver.resolve(v)));
         let variables: HashSet<Arc<str>> = self
             .variables
             .iter()
@@ -301,7 +296,7 @@ impl Completer {
                         }
                         let tokens = r.1;
                         let r = crate::complete_helper::normal(
-                            &self,
+                            self,
                             index_value,
                             boundary_indices,
                             pos,
@@ -489,15 +484,12 @@ impl Completer {
             ctx.control_name.replace(Rc::from("()"));
         } else {
             for (k, v) in m {
-                match v {
-                    Token::Object(r, value) => {
-                        ctx.control_name.replace(Rc::from(k));
-                        ctx.loc.replace(*r);
-                        ctx.layer.fetch_add(1, std::sync::atomic::Ordering::Acquire);
-                        Self::build_control_tree(tr, value.as_ref().unwrap(), ctx);
-                        Self::pop_tree(tr, ctx);
-                    }
-                    _ => {}
+                if let Token::Object(r, value) = v {
+                    ctx.control_name.replace(Rc::from(k));
+                    ctx.loc.replace(*r);
+                    ctx.layer.fetch_add(1, std::sync::atomic::Ordering::Acquire);
+                    Self::build_control_tree(tr, value.as_ref().unwrap(), ctx);
+                    Self::pop_tree(tr, ctx);
                 }
             }
         }

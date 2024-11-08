@@ -4,7 +4,7 @@ use std::sync::Arc;
 use log::trace;
 use tower_lsp::lsp_types::{
     Color, ColorInformation, CompletionItem, CompletionItemKind, CompletionItemLabelDetails,
-    CompletionTextEdit, InsertReplaceEdit, InsertTextFormat, Position, Range, TextEdit,
+    CompletionTextEdit, InsertTextFormat, Position, Range, TextEdit,
 };
 
 use crate::completer::{AutoTree, Completer, ControlNode};
@@ -40,7 +40,7 @@ fn find_neighbors_token<'a>(flatted_tokens: &Vec<&'a Token>, index: usize) -> Ve
             if index < 0 || index >= flatted_tokens.len() as isize {
                 neighbors.push(None);
             } else {
-                neighbors.push(flatted_tokens.get(index as usize).map(|f| *f));
+                neighbors.push(flatted_tokens.get(index as usize).copied());
             }
         }
     }
@@ -600,7 +600,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_find_closest_node() {
-        use crate::complete_helper::find_closest_node;
+        
 
         let p = crate::load_completer().await;
         let path = PathBuf::from("test");

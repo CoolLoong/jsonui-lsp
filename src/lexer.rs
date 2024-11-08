@@ -133,21 +133,21 @@ struct ParseContext<'a> {
 impl<'a> ParseContext<'a> {
     pub(crate) fn current(&mut self) -> Option<Arc<str>> {
         let r = self.chars.get(*self.index);
-        r.map(|f| f.clone())
+        r.cloned()
     }
 
     pub(crate) fn peek(&mut self) -> Option<Arc<str>> {
         let r = self.chars.get(*self.index + 1);
-        r.map(|f| f.clone())
+        r.cloned()
     }
 
     pub(crate) fn peek_n(&mut self, index: usize) -> Option<Arc<str>> {
         let r = self.chars.get(*self.index + index);
-        r.map(|f| f.clone())
+        r.cloned()
     }
 
     pub(crate) fn skip(&mut self, n: usize) {
-        *self.index = *self.index + n;
+        *self.index += n;
     }
 
     pub(crate) fn index(&self) -> usize {
@@ -261,7 +261,7 @@ impl Lexer {
         let mut hex_digits = String::new();
         for i in 1..5 {
             if let Some(next_char) = ctx.peek_n(i) {
-                if next_char.as_ref().chars().all(|c| c.is_digit(16)) {
+                if next_char.as_ref().chars().all(|c| c.is_ascii_hexdigit()) {
                     hex_digits.push_str(&next_char);
                     ctx.skip(1);
                 } else {
@@ -486,8 +486,8 @@ pub(crate) async fn parse_full(input: &str) -> Option<((usize, usize), Vec<Token
 
 pub(crate) async fn parse(range: Option<(usize, usize)>, input: &str) -> Option<Vec<Token>> {
     let doc = Document::from(Arc::from(input));
-    let r = Lexer::new().parse(range, &doc).await;
-    r
+    
+    Lexer::new().parse(range, &doc).await
 }
 
 pub(crate) fn to_map(tokens: Vec<Token>) -> std::collections::HashMap<String, Token> {
@@ -521,7 +521,7 @@ pub(crate) fn to_map(tokens: Vec<Token>) -> std::collections::HashMap<String, To
     r
 }
 
-pub(crate) fn to_map_ref<'a>(tokens: &'a Vec<Token>) -> std::collections::HashMap<String, &'a Token> {
+pub(crate) fn to_map_ref(tokens: &Vec<Token>) -> std::collections::HashMap<String, &Token> {
     let mut key = String::new();
 
     let mut collect = false;
@@ -560,7 +560,7 @@ pub(crate) fn to_string(token: Token) -> String {
     }
 }
 
-pub(crate) fn to_string_ref<'a>(token: &'a Token) -> String {
+pub(crate) fn to_string_ref(token: &Token) -> String {
     if let Token::Str(_, v) = token {
         v.clone()
     } else {
@@ -587,7 +587,7 @@ pub(crate) fn to_num_array(token: Token) -> Vec<f32> {
     }
 }
 
-pub(crate) fn to_array_ref<'a>(token: &'a Token) -> Option<&'a Vec<Token>> {
+pub(crate) fn to_array_ref(token: &Token) -> Option<&Vec<Token>> {
     if let Token::Array(_, v) = token {
         Some(v.as_ref().unwrap())
     } else {
@@ -603,7 +603,7 @@ pub(crate) fn to_bool(token: Token) -> bool {
     }
 }
 
-pub(crate) fn to_bool_ref<'a>(token: &'a Token) -> bool {
+pub(crate) fn to_bool_ref(token: &Token) -> bool {
     if let Token::Bool(_, v) = token {
         *v
     } else {
@@ -619,7 +619,7 @@ pub(crate) fn to_number(token: Token) -> f32 {
     }
 }
 
-pub(crate) fn to_number_ref<'a>(token: &'a Token) -> f32 {
+pub(crate) fn to_number_ref(token: &Token) -> f32 {
     if let Token::Num(_, v) = token {
         *v
     } else {
@@ -643,10 +643,10 @@ mod tests {
     use std::sync::Arc;
 
     use flexi_logger::{FileSpec, LogSpecification, Logger, LoggerHandle, WriteMode};
-    use log::trace;
+    
 
     use crate::document::Document;
-    use crate::lexer::{to_array, to_num_array, Lexer, Token};
+    use crate::lexer::{to_num_array, Lexer, Token};
     use crate::{JSONUI_DEFINE, VANILLAPACK_DEFINE};
 
     #[tokio::test]
@@ -658,9 +658,9 @@ mod tests {
         setup_logger();
         let r = r.parse(None, &doc).await;
         if let Some(r) = r
-            && let Token::Object(_, v) = r.get(0).unwrap()
+            && let Token::Object(_, v) = r.first().unwrap()
         {
-            let r = v.as_ref().unwrap().get(0).unwrap();
+            let r = v.as_ref().unwrap().first().unwrap();
             if let Token::Str(_, r) = r {
                 assert_eq!(r, "namespace");
             } else {
@@ -680,9 +680,9 @@ mod tests {
         setup_logger();
         let r = r.parse(None, &doc).await;
         if let Some(r) = r
-            && let Token::Object(_, v) = r.get(0).unwrap()
+            && let Token::Object(_, v) = r.first().unwrap()
         {
-            let r = v.as_ref().unwrap().get(0).unwrap();
+            let r = v.as_ref().unwrap().first().unwrap();
             if let Token::Str(_, r) = r {
                 assert_eq!(r, "update_dimensions");
             } else {
@@ -701,9 +701,9 @@ mod tests {
         setup_logger();
         let r = r.parse(None, &doc).await;
         if let Some(r) = r
-            && let Token::Object(_, v) = r.get(0).unwrap()
+            && let Token::Object(_, v) = r.first().unwrap()
         {
-            let r = v.as_ref().unwrap().get(0).unwrap();
+            let r = v.as_ref().unwrap().first().unwrap();
             if let Token::Str(_, r) = r {
                 assert_eq!(r, "common");
             } else {
@@ -734,9 +734,9 @@ mod tests {
         setup_logger();
         let r = r.parse(None, &doc).await;
         if let Some(r) = r
-            && let Token::Object(_, v) = r.get(0).unwrap()
+            && let Token::Object(_, v) = r.first().unwrap()
         {
-            let r = v.as_ref().unwrap().get(0).unwrap();
+            let r = v.as_ref().unwrap().first().unwrap();
             if let Token::Str(_, r) = r {
                 assert_eq!("radio_toggle_group", r);
             } else {
@@ -760,9 +760,9 @@ mod tests {
         setup_logger();
         let r = r.parse(None, &doc).await;
         if let Some(r) = r
-            && let Token::Object(_, v) = r.get(0).unwrap()
+            && let Token::Object(_, v) = r.first().unwrap()
         {
-            let r = v.as_ref().unwrap().get(0).unwrap();
+            let r = v.as_ref().unwrap().first().unwrap();
             if let Token::Str(_, r) = r {
                 assert_eq!("insert_text", r.as_str());
             } else {
@@ -792,9 +792,9 @@ mod tests {
         setup_logger();
         let r = r.parse(None, &doc).await;
         if let Some(r) = r
-            && let Token::Object(_, v) = r.get(0).unwrap()
+            && let Token::Object(_, v) = r.first().unwrap()
         {
-            let r = v.as_ref().unwrap().get(0).unwrap();
+            let r = v.as_ref().unwrap().first().unwrap();
             assert!(matches!(r, Token::Str(_, _)));
             if let Token::Str(_, r) = r {
                 assert_eq!("namespace", r.as_str());

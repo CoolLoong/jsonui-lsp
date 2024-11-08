@@ -333,7 +333,7 @@ pub(crate) async fn load_completer() -> Completer {
                                     name:      k2_spur,
                                     extend:    None,
                                     type_n:    Some(type_spur),
-                                    variables: variables,
+                                    variables,
                                 },
                             );
                         }
