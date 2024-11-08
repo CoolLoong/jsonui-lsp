@@ -52,8 +52,7 @@ jobs:
         if: matrix.arch == 'arm64' && matrix.os == 'ubuntu-latest'
         run: cargo install cross
       - name: Build with Cargo or Cross
-        run: |
-          node -e "const { execSync } = require('child_process'); const arch = process.env.MATRIX_ARCH; const os = process.env.MATRIX_OS; const rustTarget = process.env.MATRIX_RUST_TARGET; if (arch === 'arm64' && os === 'ubuntu-latest') { console.log('Using cross to build...'); execSync('cross build --verbose --release --target=' + rustTarget, { stdio: 'inherit' }); } else { console.log('Using cargo to build...'); execSync('rustup set auto-self-update disable', { stdio: 'inherit' }); execSync('rustup target add ' + rustTarget, { stdio: 'inherit' }); execSync('cargo build --verbose --release --target=' + rustTarget, { stdio: 'inherit' }); }"
+        run: node .github/scripts/build.js
         env:
           MATRIX_ARCH: ${{ matrix.arch }}
           MATRIX_OS: ${{ matrix.os }}
@@ -65,17 +64,15 @@ jobs:
       - name: build client and move execute file
         run: |
           npx webpack --mode production --config webpack.config.js
-          node -e "const fs = require('fs'); const path = require('path'); const targetDir = process.env.TARGET; const sourcePaths = ['target/' + targetDir + '/release/jsonui-lsp', 'target/' + targetDir + '/release/jsonui-lsp.exe']; const destDir = 'dist'; sourcePaths.forEach(sourcePath => { const destPath = path.join(destDir, path.basename(sourcePath)); if (fs.existsSync(sourcePath)) { fs.renameSync(sourcePath, destPath); console.log('File', path.basename(sourcePath), 'moved successfully to', destPath); } else { console.log('File', path.basename(sourcePath), 'not found at', sourcePath); } });"
+          node .github/scripts/moveRelease.js
         env:
           TARGET: ${{ matrix.rust_target }}
       - shell: pwsh
         run: echo "target=${{ matrix.platform }}-${{ matrix.arch }}" >> $env:GITHUB_ENV
-      - run: |
-          if [[ "${{ github.event.head_commit.message }}" == *"-pre"* ]]; then
-            npx vsce package --pre-release --target ${{ env.target }}
-          else
-            npx vsce package --target ${{ env.target }}
-          fi
+      - run: node .github/scripts/package.js
+        env:
+          GITHUB_EVENT_HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          TARGET: ${{ env.target }}
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.target }}
@@ -88,10 +85,13 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
       - run: |
+          echo "Checking commit message for '-pre'..."
           if [[ "${{ github.event.head_commit.message }}" == *"-pre"* ]]; then
-            npx vsce publish --pre-release --packagePath $(find . -iname *.vsix)
+            echo "Publishing pre-release version..."
+            npx vsce publish --pre-release --packagePath $(find . -iname *.vsix) --no-dependencies
           else
-            npx vsce publish --packagePath $(find . -iname *.vsix)
+            echo "Publishing stable version..."
+            npx vsce publish --packagePath $(find . -iname *.vsix) --no-dependencies
           fi
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
