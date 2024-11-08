@@ -27,7 +27,7 @@ pub(crate) type AutoTree<T> = Tree<AutomatedId, T>;
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub(crate) struct ControlNode {
     pub(crate) define: ControlDefine,
-    pub(crate) loc: (usize, usize),
+    pub(crate) loc:    (usize, usize),
 }
 impl Display for ControlNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -42,9 +42,9 @@ impl ControlNode {
 }
 
 pub(crate) struct PooledControlDefine {
-    pub(crate) name: Spur,
-    pub(crate) extend: Option<(Spur, Spur)>,
-    pub(crate) type_n: Option<Spur>,
+    pub(crate) name:      Spur,
+    pub(crate) extend:    Option<(Spur, Spur)>,
+    pub(crate) type_n:    Option<Spur>,
     pub(crate) variables: std::collections::HashSet<Spur>,
 }
 impl PooledControlDefine {
@@ -72,17 +72,17 @@ impl PooledControlDefine {
 
 #[derive(Debug, Default)]
 pub(crate) struct ControlDefine {
-    pub(crate) name: Arc<str>,
-    pub(crate) extend: Option<(Arc<str>, Arc<str>)>,
-    pub(crate) type_n: Mutex<Option<Arc<str>>>,
+    pub(crate) name:      Arc<str>,
+    pub(crate) extend:    Option<(Arc<str>, Arc<str>)>,
+    pub(crate) type_n:    Mutex<Option<Arc<str>>>,
     pub(crate) variables: Mutex<std::collections::HashSet<Arc<str>>>,
 }
 impl Clone for ControlDefine {
     fn clone(&self) -> Self {
         ControlDefine {
-            name: Arc::clone(&self.name),
-            extend: Clone::clone(&self.extend),
-            type_n: Mutex::new(self.type_n.lock().unwrap().clone()),
+            name:      Arc::clone(&self.name),
+            extend:    Clone::clone(&self.extend),
+            type_n:    Mutex::new(self.type_n.lock().unwrap().clone()),
             variables: Mutex::new(self.variables.lock().unwrap().clone()),
         }
     }
@@ -125,25 +125,25 @@ impl fmt::Display for ControlDefine {
 
 #[derive(Debug)]
 pub(crate) struct BuildTreeContext {
-    namespace: Rc<str>,
+    namespace:    Rc<str>,
     control_name: RefCell<Rc<str>>,
-    last_node: Cell<Option<AutomatedId>>,
-    loc: RefCell<(usize, usize)>,
-    layer: AtomicUsize,
+    last_node:    Cell<Option<AutomatedId>>,
+    loc:          RefCell<(usize, usize)>,
+    layer:        AtomicUsize,
 }
 
 #[derive(Debug)]
 pub(crate) struct RecursiveSearchContext {
-    type_n: RefCell<Option<Arc<str>>>,
+    type_n:    RefCell<Option<Arc<str>>>,
     variables: RefCell<std::collections::HashSet<Arc<str>>>,
-    layer: AtomicUsize,
+    layer:     AtomicUsize,
 }
 impl RecursiveSearchContext {
     pub fn new() -> Self {
         RecursiveSearchContext {
-            type_n: RefCell::new(None),
+            type_n:    RefCell::new(None),
             variables: RefCell::new(HashSet::new()),
-            layer: AtomicUsize::new(0),
+            layer:     AtomicUsize::new(0),
         }
     }
 }
@@ -209,22 +209,19 @@ fn extract_prefix(input: &str) -> &str {
 }
 
 pub struct Completer {
-    pub(crate) trees: RwLock<HashMap<Arc<str>, AutoTree<ControlNode>>>,
-    documents: DashMap<u64, Document>,
-    keyword: HashSet<String>,
+    pub(crate) trees:       RwLock<HashMap<Arc<str>, AutoTree<ControlNode>>>,
+    documents:              DashMap<u64, Document>,
     vanilla_controls_tabel: HashMap<(Arc<str>, Arc<str>), ControlDefine>,
-    jsonui_define: HashMap<String, Token>,
+    jsonui_define:          HashMap<String, Token>,
 }
 impl Completer {
     pub fn new(
-        keyword: HashSet<String>,
         vanilla_controls_tabel: HashMap<(Arc<str>, Arc<str>), ControlDefine>,
         jsonui_define: HashMap<String, Token>,
     ) -> Self {
         Completer {
             trees: RwLock::new(HashMap::new()),
             documents: DashMap::with_shard_amount(2),
-            keyword,
             vanilla_controls_tabel,
             jsonui_define,
         }
@@ -250,6 +247,8 @@ impl Completer {
                         trace!("error in new parser")
                     }
                 }
+            } else {
+                trace!("Failed to read content {:?}", entry.path());
             }
         }
     }
@@ -408,20 +407,20 @@ impl Completer {
             let mut tr: Tree<AutomatedId, ControlNode> =
                 AutoTree::<ControlNode>::new(Option::Some(np.as_str()));
             let ctx = BuildTreeContext {
-                namespace: Rc::from(np.as_ref()),
+                namespace:    Rc::from(np.as_ref()),
                 control_name: RefCell::new(Rc::from("()")),
-                last_node: Cell::new(None),
-                loc: RefCell::new((0, 0)),
-                layer: AtomicUsize::new(0),
+                last_node:    Cell::new(None),
+                loc:          RefCell::new((0, 0)),
+                layer:        AtomicUsize::new(0),
             };
             let root = ControlNode {
                 define: ControlDefine {
-                    name: Arc::from("root"),
-                    extend: None,
-                    type_n: Mutex::new(None),
+                    name:      Arc::from("root"),
+                    extend:    None,
+                    type_n:    Mutex::new(None),
                     variables: Mutex::new(std::collections::HashSet::<Arc<str>>::new()),
                 },
-                loc: *root_span,
+                loc:    *root_span,
             };
             Self::add_tree_node(&mut tr, &ctx, root, None);
             Self::build_control_tree(&mut tr, tokens, &ctx);
@@ -462,12 +461,12 @@ impl Completer {
             let type_n = type_n.unwrap_or("".to_string());
             let node = ControlNode {
                 define: ControlDefine {
-                    name: Arc::from(name.as_ref()),
-                    extend: Some((Arc::from(np.as_ref()), Arc::from(extend.as_ref()))),
-                    type_n: Mutex::new(Some(Arc::from(type_n.as_ref()))),
+                    name:      Arc::from(name.as_ref()),
+                    extend:    Some((Arc::from(np.as_ref()), Arc::from(extend.as_ref()))),
+                    type_n:    Mutex::new(Some(Arc::from(type_n.as_ref()))),
                     variables: Mutex::new(variables),
                 },
-                loc: ctx.loc.take(),
+                loc:    ctx.loc.take(),
             };
             Self::add_tree_node(tr, ctx, node, ctx.last_node.get().as_ref());
             for i in arrays {
@@ -607,8 +606,8 @@ mod tests {
     async fn test_completer_init() {
         let p = crate::load_completer().await;
         let path = PathBuf::from("test");
-        #[cfg(feature = "debug-parse")]
-        setup_logger();
+        assert!(path.exists());
+        crate::tests::setup_logger();
         p.init(&path).await;
         assert!(p.contain_tree("achievement"));
         assert!(p.contain_tree("add_external_server"));
@@ -620,7 +619,7 @@ mod tests {
 
     fn setup_logger() -> LoggerHandle {
         Logger::with(LogSpecification::trace())
-            .log_to_file(FileSpec::default().directory("logs").basename("debug"))
+            .log_to_file(FileSpec::default().directory("../../logs").basename("debug"))
             .write_mode(WriteMode::Direct)
             .start()
             .unwrap()

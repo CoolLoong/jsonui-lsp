@@ -22,8 +22,8 @@ use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 type StdMutex<T> = std::sync::Mutex<T>;
 
-const VANILLAPACK_DEFINE: &str = include_str!("../resources/vanillapack_define_1.21.40.3.json");
-const JSONUI_DEFINE: &str = include_str!("../resources/jsonui_define.json");
+const VANILLAPACK_DEFINE: &str = include_str!("resources/vanillapack_define_1.21.40.3.json");
+const JSONUI_DEFINE: &str = include_str!("resources/jsonui_define.json");
 const SEED: u64 = 32;
 
 #[inline]
@@ -32,34 +32,14 @@ fn hash_uri(url: &Url) -> u64 {
 }
 
 struct Backend {
-    client: Client,
-    log: Arc<LoggerHandle>,
-    lang: Mutex<Arc<str>>,
+    client:               Client,
+    log:                  Arc<LoggerHandle>,
+    lang:                 Mutex<Arc<str>>,
     pub(crate) completer: Completer,
 }
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
-    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
-        if let Some(v) = params.settings.get("log").unwrap().get("level") {
-            self.client
-                .log_message(MessageType::INFO, format!("set config level is {}", v))
-                .await;
-            match v.as_str().unwrap() {
-                "off" => {
-                    set_max_level(log::LevelFilter::Off);
-                }
-                "messages" => {
-                    set_max_level(log::LevelFilter::Error);
-                }
-                "verbose" => {
-                    set_max_level(log::LevelFilter::Trace);
-                }
-                _ => {}
-            }
-        }
-    }
-
     async fn initialize(&self, param: InitializeParams) -> Result<InitializeResult> {
         let init_config = &param.initialization_options.unwrap();
         if let Some(v) = init_config
@@ -107,7 +87,7 @@ impl LanguageServer for Backend {
             filters: file_operation_filters,
         };
         Ok(InitializeResult {
-            server_info: Some(ServerInfo {
+            server_info:  Some(ServerInfo {
                 name:    "jsonui support".to_string(),
                 version: None,
             }),
@@ -155,6 +135,61 @@ impl LanguageServer for Backend {
         })
     }
 
+    async fn initialized(&self, _: InitializedParams) {
+        self.client.log_message(MessageType::INFO, "initialized!").await;
+    }
+
+    async fn shutdown(&self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        if params.text_document.language_id != "json" {
+            return;
+        }
+        trace!("open {:?}", params.text_document.uri);
+        let arc_content: Arc<str> = Arc::from(params.text_document.text.as_str());
+        let hash_value = hash_uri(&params.text_document.uri);
+        self.completer.did_open(hash_value, arc_content).await;
+    }
+
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        let url = &params.text_document.uri;
+        let key = hash_uri(url);
+        self.completer.update_document(key, &params).await;
+    }
+
+    /// do clean completer for close file
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let url = &params.text_document.uri;
+        trace!("close {}", url);
+        let hash_value = hash_uri(url);
+        self.completer.did_close(hash_value);
+    }
+
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let url = &params.text_document_position.text_document.uri;
+        let id = hash_uri(url);
+        let l = self.lang.lock().await;
+        let r = self.completer.complete(id, l.clone(), &params).await;
+        if let Some(r) = r {
+            Ok(Some(CompletionResponse::Array(r)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn document_color(&self, params: DocumentColorParams) -> Result<Vec<ColorInformation>> {
+        let url = &params.text_document.uri;
+        let id = hash_uri(url);
+        let r = self.completer.complete_color(id).await;
+        if let Some(r) = r {
+            Ok(r)
+        } else {
+            Ok(vec![])
+        }
+    }
+
     async fn color_presentation(
         &self,
         params: ColorPresentationParams,
@@ -178,18 +213,24 @@ impl LanguageServer for Backend {
         Ok(vec![color_presentation])
     }
 
-    async fn initialized(&self, _: InitializedParams) {
-        self.client.log_message(MessageType::INFO, "initialized!").await;
-    }
-
-    async fn shutdown(&self) -> Result<()> {
-        Ok(())
-    }
-
-    async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        let url = &params.text_document.uri;
-        let key = hash_uri(url);
-        self.completer.update_document(key, &params).await;
+    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        if let Some(v) = params.settings.get("log").unwrap().get("level") {
+            self.client
+                .log_message(MessageType::INFO, format!("set config level is {}", v))
+                .await;
+            match v.as_str().unwrap() {
+                "off" => {
+                    set_max_level(log::LevelFilter::Off);
+                }
+                "messages" => {
+                    set_max_level(log::LevelFilter::Error);
+                }
+                "verbose" => {
+                    set_max_level(log::LevelFilter::Trace);
+                }
+                _ => {}
+            }
+        }
     }
 
     async fn did_create_files(&self, params: CreateFilesParams) {
@@ -225,70 +266,12 @@ impl LanguageServer for Backend {
             }
         }
     }
-
-    async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        if params.text_document.language_id != "json" {
-            return;
-        }
-        trace!("open {:?}", params.text_document.uri);
-        let arc_content: Arc<str> = Arc::from(params.text_document.text.as_str());
-        let hash_value = hash_uri(&params.text_document.uri);
-        self.completer.did_open(hash_value, arc_content).await;
-    }
-
-    /// do clean completer for close file
-    async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        let url = &params.text_document.uri;
-        trace!("close {}", url);
-        let hash_value = hash_uri(url);
-        self.completer.did_close(hash_value);
-    }
-
-    async fn document_color(&self, params: DocumentColorParams) -> Result<Vec<ColorInformation>> {
-        let url = &params.text_document.uri;
-        let id = hash_uri(url);
-        let r = self.completer.complete_color(id).await;
-        if let Some(r) = r {
-            Ok(r)
-        } else {
-            Ok(vec![])
-        }
-    }
-
-    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        let url = &params.text_document_position.text_document.uri;
-        let id = hash_uri(url);
-        let l = self.lang.lock().await;
-        let r = self.completer.complete(id, l.clone(), &params).await;
-        if let Some(r) = r {
-            Ok(Some(CompletionResponse::Array(r)))
-        } else {
-            Ok(None)
-        }
-    }
 }
 
 impl Backend {
     async fn init_workspace(&self, workspace_folders: PathBuf) {
         self.completer.init(&workspace_folders).await;
     }
-}
-
-fn extract_keyword_from_json(
-    keys: &[&str],
-    json_map: &HashMap<String, lexer::Token>,
-) -> HashSet<String> {
-    let mut keyword = HashSet::new();
-    for key in keys {
-        if let Some(value) = json_map.get(*key) {
-            if let Some(v) = lexer::to_array_ref(value) {
-                for item in v {
-                    keyword.insert(lexer::to_string_ref(item));
-                }
-            }
-        }
-    }
-    keyword
 }
 
 pub(crate) async fn load_completer() -> Completer {
@@ -361,40 +344,14 @@ pub(crate) async fn load_completer() -> Completer {
         .await
         .expect("can parse jsonui_define.json");
     let jsonui_define_map: HashMap<String, lexer::Token> = lexer::to_map(jsonui_define.1);
-    let keys = [
-        "common",
-        "bindings_properties",
-        "none",
-        "global",
-        "collection",
-        "collection_details",
-        "view",
-        "label",
-        "image",
-        "stack_panel",
-        "input_panel",
-        "collection_panel",
-        "button",
-        "toggle",
-        "dropdown",
-        "slider",
-        "slider_box",
-        "edit_box",
-        "grid",
-        "scroll_view",
-        "selection_wheel",
-        "screen",
-        "custom",
-    ];
-    let keyword = extract_keyword_from_json(&keys, &jsonui_define_map);
-    Completer::new(keyword, vanilla_controls_tabel, jsonui_define_map)
+    Completer::new(vanilla_controls_tabel, jsonui_define_map)
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
-    let log: flexi_logger::LoggerHandle = Logger::with(LogSpecification::info()).start().unwrap();
+    let log = Logger::with(LogSpecification::info()).start().unwrap();
 
     let completer = load_completer().await;
     let (service, socket) = LspService::build(|client| Backend {
@@ -404,6 +361,21 @@ async fn main() {
         completer,
     })
     .finish();
-    info!("starting server...");
+    info!("starting jsonui_lsp...");
     Server::new(stdin, stdout, socket).serve(service).await;
+}
+
+#[cfg(test)]
+mod tests {
+    pub(crate) fn setup_logger() {
+        #[cfg(feature = "debug-parse")]
+        {
+            use flexi_logger::{FileSpec, LogSpecification, Logger, WriteMode};
+            Logger::with(LogSpecification::trace())
+                .log_to_file(FileSpec::default().directory("../../logs").basename("debug"))
+                .write_mode(WriteMode::Direct)
+                .start()
+                .unwrap();
+        }
+    }
 }

@@ -47,7 +47,7 @@ fn main() -> io::Result<()> {
         result.insert(k.clone(), export_map);
     }
 
-    let output_path = format!("resources/vanillapack_define_{}.json", VERSION);
+    let output_path = format!("crates/jsonui_lsp/src/resources/vanillapack_define_{}.json", VERSION);
     let output_dir = Path::new(output_path.as_str()).parent().unwrap();
     if !output_dir.exists() {
         fs::create_dir_all(output_dir)?;

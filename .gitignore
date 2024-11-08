@@ -1,10 +1,9 @@
 /target
 node_modules
-.pnpm-debug.log
-*.ast 
 dist/
-*.vsix
-pnpm-lock.yaml
-Cargo.lock
 .idea
 logs/
+.pnpm-debug.log
+*.ast
+*.vsix
+Cargo.lock

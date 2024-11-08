@@ -15,7 +15,7 @@ let client: LanguageClient;
 export async function activate(context: ExtensionContext) {
   console.info("jsonui-support client start!");
   // backend path
-  const command = process.env.SERVER_PATH || path.join(context.extensionPath, 'dist', 'jsonui-lsp');
+  const command = process.env.SERVER_PATH || path.join(context.extensionPath, 'dist', 'jsonui_lsp');
   const run: Executable = {
     command,
     options: {
@@ -46,7 +46,6 @@ export async function activate(context: ExtensionContext) {
     clientOptions
   );
 
-  //push workspace/didChangeConfiguration to server
   workspace.onDidChangeConfiguration((e) => {
     let isAffected = e.affectsConfiguration("jsonui-support");
     if (!isAffected) {
@@ -57,7 +56,7 @@ export async function activate(context: ExtensionContext) {
     );
     client.sendNotification("workspace/didChangeConfiguration", { settings });
   });
-  client.start();
+  await client.start();
 }
 
 export function deactivate(): Thenable<void> | undefined {

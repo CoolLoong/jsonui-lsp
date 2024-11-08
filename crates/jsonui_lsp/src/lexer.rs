@@ -209,7 +209,7 @@ impl Lexer {
 
         while let Some(s) = ctx.current() {
             let cr = s.as_ref();
-            #[cfg(feature = "debug-parse")]
+            
             trace!("['{}', state {:?}]", cr, ctx.current);
             match cr.into() {
                 _ if Self::is_escape(ctx) => Self::handle_escape_char(ctx, cr),
@@ -628,7 +628,6 @@ pub(crate) fn to_number_ref(token: &Token) -> f32 {
 }
 
 #[allow(unused_imports)]
-
 pub(crate) mod prelude {
     pub(crate) use super::{
         parse, parse_full, to_array, to_array_ref, to_bool, to_bool_ref, to_map, to_map_ref, to_number,
@@ -637,7 +636,6 @@ pub(crate) mod prelude {
 }
 
 #[cfg(test)]
-
 mod tests {
     use std::sync::Arc;
 
@@ -653,8 +651,8 @@ mod tests {
         let r = Lexer::new();
         let input = include_str!("../test/achievement.json");
         let doc = Document::from(Arc::from(input));
-        #[cfg(feature = "debug-parse")]
-        setup_logger();
+        
+        crate::tests::setup_logger();
         let r = r.parse(None, &doc).await;
         if let Some(r) = r
             && let Token::Object(_, v) = r.first().unwrap()
@@ -675,8 +673,8 @@ mod tests {
     async fn test_parse_full_2() -> Result<(), Box<dyn std::error::Error>> {
         let r = Lexer::new();
         let doc = Document::from(Arc::from(VANILLAPACK_DEFINE));
-        #[cfg(feature = "debug-parse")]
-        setup_logger();
+        
+        crate::tests::setup_logger();
         let r = r.parse(None, &doc).await;
         if let Some(r) = r
             && let Token::Object(_, v) = r.first().unwrap()
@@ -696,8 +694,8 @@ mod tests {
     async fn test_parse_full_3() -> Result<(), Box<dyn std::error::Error>> {
         let r = Lexer::new();
         let doc = Document::from(Arc::from(JSONUI_DEFINE));
-        #[cfg(feature = "debug-parse")]
-        setup_logger();
+        
+        crate::tests::setup_logger();
         let r = r.parse(None, &doc).await;
         if let Some(r) = r
             && let Token::Object(_, v) = r.first().unwrap()
@@ -729,8 +727,8 @@ mod tests {
   }
 }"#,
         ));
-        #[cfg(feature = "debug-parse")]
-        setup_logger();
+        
+        crate::tests::setup_logger();
         let r = r.parse(None, &doc).await;
         if let Some(r) = r
             && let Token::Object(_, v) = r.first().unwrap()
@@ -755,8 +753,8 @@ mod tests {
             "test" : "exxx"
             }"#,
         ));
-        #[cfg(feature = "debug-parse")]
-        setup_logger();
+        
+        crate::tests::setup_logger();
         let r = r.parse(None, &doc).await;
         if let Some(r) = r
             && let Token::Object(_, v) = r.first().unwrap()
@@ -787,8 +785,8 @@ mod tests {
                 "namespace": "test"
             }"#,
         ));
-        #[cfg(feature = "debug-parse")]
-        setup_logger();
+        
+        crate::tests::setup_logger();
         let r = r.parse(None, &doc).await;
         if let Some(r) = r
             && let Token::Object(_, v) = r.first().unwrap()
@@ -814,8 +812,8 @@ mod tests {
     "color": [0.941, 0.941, 0.035, 0.623]
   },"#,
         ));
-        #[cfg(feature = "debug-parse")]
-        setup_logger();
+        
+        crate::tests::setup_logger();
         let r = r.parse(None, &doc).await;
         if let Some(r) = r
             && let Token::Object(_, v) = r.get(2).unwrap()
@@ -825,13 +823,5 @@ mod tests {
         } else {
             panic!()
         }
-    }
-
-    fn setup_logger() -> LoggerHandle {
-        Logger::with(LogSpecification::trace())
-            .log_to_file(FileSpec::default().directory("logs").basename("debug"))
-            .write_mode(WriteMode::Direct)
-            .start()
-            .unwrap()
     }
 }

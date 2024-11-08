@@ -602,20 +602,22 @@ mod tests {
     async fn test_find_closest_node() {
         let p = crate::load_completer().await;
         let path = PathBuf::from("test");
+        assert!(path.exists());
+
+        
+        crate::tests::setup_logger();
         p.init(&path).await;
+
         let trees = p.trees.read().unwrap();
         let r = trees.get("add_external_server");
-
-
-        // let r = r.unwrap();
-
-        // let cr = find_closest_node(r, &r.get_root_node().unwrap(), 999);
-        // let cr = cr.expect("cant find closest node");
-        // let r = r.get_node_by_id(&cr);
-        // if let Some(v) = r {
-        //     assert_eq!("remove_button", v.get_value().unwrap().define.name.as_ref());
-        // } else {
-        //     panic!()
-        // }
+        let r = r.unwrap();
+        let cr = super::find_closest_node(r, &r.get_root_node().unwrap(), 999);
+        let cr = cr.expect("cant find closest node");
+        let r = r.get_node_by_id(&cr);
+        if let Some(v) = r {
+            assert_eq!("remove_button", v.get_value().unwrap().define.name.as_ref());
+        } else {
+            panic!()
+        }
     }
 }
