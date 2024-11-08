@@ -7,14 +7,14 @@ use std::path::Path;
 use std::rc::Rc;
 
 use jsonc_parser::parse_to_serde_value;
-use serde_json::Value;
+use serde_json::{json, Value};
 use walkdir::WalkDir;
 
 const VERSION: &str = "1.21.40.3";
 
 fn main() -> io::Result<()> {
     let namespace_map: Rc<RefCell<HashMap<String, Value>>> = Rc::new(RefCell::new(HashMap::new()));
-    let mut result: HashMap<String, HashMap<String, String>> = HashMap::new();
+    let mut result: HashMap<String, HashMap<String, serde_json::Value>> = HashMap::new();
 
     print!("please input vanilla pack path: ");
     io::stdout().flush()?;
@@ -42,9 +42,9 @@ fn main() -> io::Result<()> {
 
     let map: &RefCell<HashMap<String, Value>> = namespace_map.borrow();
     for (k, v) in map.borrow().iter() {
-        let mut type_map: HashMap<String, String> = HashMap::new();
-        process_properties(None, &v, &mut type_map, &map.borrow());
-        result.insert(k.clone(), type_map);
+        let mut export_map: HashMap<String, serde_json::Value> = HashMap::new();
+        process_properties(None, &k.clone(), &v, &mut export_map, &map.borrow());
+        result.insert(k.clone(), export_map);
     }
 
     let output_path = format!("resources/vanillapack_define_{}.json", VERSION);
@@ -81,37 +81,90 @@ fn process_file(path: &Path, namespace_map: &mut HashMap<String, Value>) -> io::
 
 fn process_properties(
     name: Option<&str>,
+    namespace: &String,
     properties: &Value,
-    type_map: &mut HashMap<String, String>,
+    export_map: &mut HashMap<String, serde_json::Value>,
     namespace_map: &HashMap<String, Value>,
 ) {
     for (key, value) in properties.as_object().unwrap() {
-        let sp: Vec<&str> = key.split('@').collect();
+        let split_key: Vec<&str> = key.split('@').collect();
+        let np = name.unwrap_or(split_key[0]).to_string();
+
+        if let Value::Object(map) = value {
+            for map_key in map.keys() {
+                update_export_map(export_map, &np, map_key.replace("|default", ""));
+            }
+        }
+
         if let Some(type_value) = value.get("type").and_then(Value::as_str) {
-            type_map.insert(name.unwrap_or(sp[0]).to_string(), type_value.to_string());
-        } else if key.contains('@') {
-            let parts: Vec<&str> = key.split('@').collect();
-            if parts.len() == 2 {
-                let rest = parts[1];
-                let parts: Vec<&str> = rest.split('.').collect();
-                if parts.len() == 2 {
-                    let namespace = parts[0];
-                    let control_name = parts[1];
-                    if let Some(namespace_object) = namespace_map.get(namespace) {
-                        if let Some(properties) = namespace_object.as_object() {
-                            for (kk, vv) in properties {
-                                if extract_prefix(kk) == control_name {
-                                    let next = if name.is_none() { Some(sp[0]) } else { name };
-                                    process_properties(next, vv, type_map, namespace_map);
-                                    break;
-                                }
-                            }
-                        }
+            set_export_type(export_map, &np, type_value);
+        }
+
+        if key.contains('@') {
+            handle_namespace(key, &namespace, namespace_map, name, export_map);
+        } else if key == "type" {
+            set_export_type(export_map, &np, value.as_str().unwrap());
+        } else if key.starts_with('$') {
+            update_export_map(export_map, &np, key.replace("|default", ""));
+        }
+    }
+}
+
+fn update_export_map(export_map: &mut HashMap<String, serde_json::Value>, key: &str, variable: String) {
+    if variable.starts_with("$") {
+        let entry = export_map.entry(key.to_string()).or_insert_with(|| json!({}));
+        if let Value::Object(map) = entry {
+            let variables = map
+                .entry("variables")
+                .or_insert_with(|| json!([]))
+                .as_array_mut()
+                .unwrap();
+            variables.push(json!(variable));
+        }
+    }
+}
+
+fn set_export_type(export_map: &mut HashMap<String, serde_json::Value>, key: &str, type_value: &str) {
+    let entry = export_map.entry(key.to_string()).or_insert_with(|| json!({}));
+    if let Value::Object(map) = entry {
+        map.insert("type".to_string(), json!(type_value.to_string()));
+    }
+}
+
+fn handle_namespace(
+    key: &str,
+    namespace: &String,
+    namespace_map: &HashMap<String, Value>,
+    name: Option<&str>,
+    export_map: &mut HashMap<String, serde_json::Value>,
+) {
+    let parts: Vec<&str> = key.split('@').collect();
+    if parts.len() == 2 {
+        let rest = parts[1];
+        let parts_namespace: Vec<&str> = rest.split('.').collect();
+        let (np, cn) = if parts_namespace.len() == 2 {
+            (parts_namespace[0], parts_namespace[1])
+        } else {
+            (namespace.as_ref(), parts_namespace[0])
+        };
+        if let Some(namespace_object) = namespace_map.get(np) {
+            if let Some(ns_properties) = namespace_object.as_object() {
+                for (kk, v) in ns_properties {
+                    if extract_prefix(kk) == cn {
+                        let next_name = name.or(Some(parts[0]));
+                        let json = format!("{{ \"{}\": {} }}", kk, serde_json::to_string(v).unwrap());
+                        let target = serde_json::from_str(json.as_str()).unwrap();
+                        process_properties(
+                            next_name,
+                            &np.to_string(),
+                            &target,
+                            export_map,
+                            namespace_map,
+                        );
+                        break;
                     }
                 }
             }
-        } else if key == "type" {
-            type_map.insert(name.unwrap_or(sp[0]).to_string(), value.as_str().unwrap().to_string());
         }
     }
 }

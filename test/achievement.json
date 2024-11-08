@@ -31,7 +31,7 @@
     "clip_pixelperfect": false,
     "controls": [
       {
-        "full_progress_bar_icon_base": {
+        "full_progress_bar_icon_base2": {
           "type": "image",
           "texture": "textures/ui/experiencebarfull",
           "clip_direction": "left",

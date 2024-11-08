@@ -4,14 +4,12 @@ use tokio::sync::Mutex;
 use tower_lsp::lsp_types::{DidChangeTextDocumentParams, Position};
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::get_namespace;
-
 #[derive(Debug)]
 pub struct Document {
-    pub namespace: String,
-    pub line_info_cache: Mutex<Vec<LineInfo>>,
-    pub content_cache:   Mutex<String>,
-    pub content_chars:   Mutex<Vec<Arc<str>>>,
+    namespace: String,
+    line_info_cache: Mutex<Vec<LineInfo>>,
+    content_cache: Mutex<String>,
+    pub(crate) chars: Mutex<Vec<Arc<str>>>,
 }
 
 #[derive(Debug)]
@@ -22,81 +20,22 @@ pub struct LineInfo {
 
 impl Document {
     pub fn from(str: Arc<str>) -> Self {
-        let content: String = str.chars().collect();
-        let content_chars: Vec<Arc<str>> = content.graphemes(true).map(Arc::from).collect();
-        let namespace = get_namespace(str.clone()).unwrap_or("unknown_namespace".to_string());
+        let content_chars: Vec<Arc<str>> = str.graphemes(true).map(Arc::from).collect();
+        let namespace = Self::get_namespace(str.clone()).unwrap_or("unknown_namespace".to_string());
         Self {
             namespace,
             line_info_cache: Self::init_line_info_cache(str.as_ref()),
-            content_cache:   Mutex::new(content),
-            content_chars:   Mutex::new(content_chars),
+            content_cache: Mutex::new(str.to_string()),
+            chars: Mutex::new(content_chars),
         }
     }
 
-    fn init_line_info_cache(content: &str) -> Mutex<Vec<LineInfo>> {
-        Mutex::new(Self::build_line_info_cache(content))
+    pub async fn get_content(&self) -> Arc<str> {
+        Arc::from(self.content_cache.lock().await.as_str())
     }
 
-    pub async fn get_char(&self, index: usize) -> Option<Arc<str>> {
-        let chars = self.content_chars.lock().await;
-        if index >= chars.len() {
-            None
-        } else {
-            Some(chars[index].clone())
-        }
-    }
-
-    pub async fn replace_grapheme_range(&self, start_idx: usize, end_idx: usize, replacement: Arc<str>) {
-        let mut chars = self.content_chars.lock().await;
-        if start_idx > end_idx || start_idx > chars.len() || end_idx > chars.len() {
-            panic!()
-        }
-
-        let (before, after) = if end_idx == start_idx {
-            chars.split_at(start_idx)
-        } else {
-            let (s, _) = chars.split_at(start_idx);
-            let (_, e) = chars.split_at(end_idx);
-            (s, e)
-        };
-        let mut result: Vec<Arc<str>> = Vec::new();
-        result.extend_from_slice(before);
-        result.append(
-            &mut replacement
-                .graphemes(true)
-                .map(Arc::from)
-                .collect::<Vec<Arc<str>>>(),
-        );
-        result.extend_from_slice(after);
-
-        let mut content = self.content_cache.lock().await;
-        *content = result.join("");
-        *chars = result;
-    }
-
-    fn build_line_info_cache(content: &str) -> Vec<LineInfo> {
-        let mut line_info_table = Vec::new();
-        let mut start_index = 0;
-        let mut char_count = 0;
-        let chars = content.graphemes(true).peekable();
-        for c in chars {
-            char_count += 1;
-            if c == "\n" || c == "\r\n" {
-                line_info_table.push(LineInfo {
-                    start_index,
-                    char_count,
-                });
-                start_index += char_count;
-                char_count = 0;
-            }
-        }
-        if char_count > 0 {
-            line_info_table.push(LineInfo {
-                start_index,
-                char_count,
-            });
-        }
-        line_info_table
+    pub fn get_cache_namespace(&self) -> Arc<str> {
+        Arc::from(self.namespace.as_str())
     }
 
     /// position line index start from 0
@@ -174,26 +113,10 @@ impl Document {
         }
     }
 
-    fn handle_boundary_char<'a>(char: &'a str, boundary_stacks: &mut Vec<Vec<&'a str>>) {
-        //trace!("{}",char);
-        let (current_index, opposite_index) = match char {
-            "{" => (0, 1),
-            "}" => (1, 0),
-            "[" => (2, 3),
-            "]" => (3, 2),
-            _ => unreachable!(),
-        };
-        if boundary_stacks[opposite_index].is_empty() {
-            boundary_stacks[current_index].push(char);
-        } else {
-            boundary_stacks[opposite_index].pop();
-        }
-    }
-
     pub async fn get_boundary_indices(&self, index: usize) -> Option<(usize, usize)> {
-        let content = self.content_chars.lock().await;
+        let content = self.chars.lock().await;
         let (forward, backward) = content.split_at(index);
-        //trace!("{:?} {:?}",forward,backward);
+        // trace!("{:?} {:?}",forward,backward);
         if forward.is_empty() || backward.is_empty() {
             return None;
         }
@@ -242,6 +165,103 @@ impl Document {
         let end_index_v = end_index?;
         Some((start_index_v, end_index_v))
     }
+
+    pub async fn get_char(&self, index: usize) -> Option<Arc<str>> {
+        let chars = self.chars.lock().await;
+        if index >= chars.len() {
+            None
+        } else {
+            Some(chars[index].clone())
+        }
+    }
+
+    pub async fn replace_grapheme_range(&self, start_idx: usize, end_idx: usize, replacement: Arc<str>) {
+        let mut chars = self.chars.lock().await;
+        if start_idx > end_idx || start_idx > chars.len() || end_idx > chars.len() {
+            panic!()
+        }
+
+        let (before, after) = if end_idx == start_idx {
+            chars.split_at(start_idx)
+        } else {
+            let (s, _) = chars.split_at(start_idx);
+            let (_, e) = chars.split_at(end_idx);
+            (s, e)
+        };
+        let mut result: Vec<Arc<str>> = Vec::new();
+        result.extend_from_slice(before);
+        result.append(
+            &mut replacement
+                .graphemes(true)
+                .map(Arc::from)
+                .collect::<Vec<Arc<str>>>(),
+        );
+        result.extend_from_slice(after);
+
+        let mut content = self.content_cache.lock().await;
+        *content = result.join("");
+        *chars = result;
+    }
+
+    fn build_line_info_cache(content: &str) -> Vec<LineInfo> {
+        let mut line_info_table = Vec::new();
+        let mut start_index = 0;
+        let mut char_count = 0;
+        let chars = content.graphemes(true).peekable();
+        for c in chars {
+            char_count += 1;
+            if c == "\n" || c == "\r\n" {
+                line_info_table.push(LineInfo {
+                    start_index,
+                    char_count,
+                });
+                start_index += char_count;
+                char_count = 0;
+            }
+        }
+        if char_count > 0 {
+            line_info_table.push(LineInfo {
+                start_index,
+                char_count,
+            });
+        }
+        line_info_table
+    }
+
+    fn handle_boundary_char<'a>(char: &'a str, boundary_stacks: &mut Vec<Vec<&'a str>>) {
+        // trace!("{}",char);
+        let (current_index, opposite_index) = match char {
+            "{" => (0, 1),
+            "}" => (1, 0),
+            "[" => (2, 3),
+            "]" => (3, 2),
+            _ => unreachable!(),
+        };
+        if boundary_stacks[opposite_index].is_empty() {
+            boundary_stacks[current_index].push(char);
+        } else {
+            boundary_stacks[opposite_index].pop();
+        }
+    }
+
+    pub(crate) fn get_namespace(s: Arc<str>) -> Option<String> {
+        const NAMESPACE: &str = "namespace\"";
+        let mut crs = s.chars().peekable();
+
+        while let Some(ch) = crs.next() {
+            if ch == '"' && NAMESPACE.chars().all(|c| Some(c) == crs.next()) {
+                let mut skip_w = crs.skip_while(|&c| c != '"');
+                skip_w.next();
+                let result: String = skip_w.take_while(|&c| c != '"').collect();
+                return Some(result);
+            }
+        }
+        None
+    }
+
+    fn init_line_info_cache(content: &str) -> Mutex<Vec<LineInfo>> {
+        Mutex::new(Self::build_line_info_cache(content))
+    }
 }
 
 #[cfg(test)]
@@ -253,7 +273,7 @@ mod tests {
 
     use super::*;
 
-    const EXAMPLE1: &str = include_str!("../test/achievement_screen.json");
+    const EXAMPLE1: &str = include_str!("../test/achievement.json");
 
     #[tokio::test]
     async fn test_apply_change() {
@@ -384,5 +404,22 @@ mod tests {
             .unwrap();
         let result = document.get_boundary_indices(v).await;
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_get_namespace_esay() {
+        let result = Document::get_namespace(Arc::from(r#"{"namespace": "test"}"#)).unwrap();
+        let expect = "test";
+        assert_eq!(result, expect);
+    }
+
+    #[test]
+    fn test_get_namespace_hard() {
+        let result = Document::get_namespace(Arc::from(
+            r#"// this is comment{"test_control": {"type": "panel"},"namespace": "test"}"#,
+        ))
+            .unwrap();
+        let expect = "test";
+        assert_eq!(result, expect);
     }
 }

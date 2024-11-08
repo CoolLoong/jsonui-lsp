@@ -1,58 +1,41 @@
 #![feature(let_chains)]
 
-mod completion;
-mod completion_helper;
+mod complete_helper;
+mod completer;
 mod document;
-mod parser;
-mod path_info;
-mod tokenizer;
+mod generator;
+mod lexer;
+mod tree_ds;
 
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use completion::Completer;
-use dashmap::DashMap;
+use completer::Completer;
 use flexi_logger::{LogSpecification, Logger, LoggerHandle};
-use log::{set_max_level, trace};
-use parser::Parser;
-use serde_json::{json, Value};
+use lasso::Rodeo;
+use log::{info, set_max_level, trace};
 use tokio::sync::Mutex;
-use tower_lsp::jsonrpc::{Error, ErrorCode, Result};
+use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
+type StdMutex<T> = std::sync::Mutex<T>;
+
 const VANILLAPACK_DEFINE: &str = include_str!("../resources/vanillapack_define_1.21.40.3.json");
 const JSONUI_DEFINE: &str = include_str!("../resources/jsonui_define.json");
-
-fn get_namespace(s: Arc<str>) -> Option<String> {
-    const NAMESPACE: &str = "namespace\"";
-    let mut crs = s.chars().peekable();
-
-    while let Some(ch) = crs.next() {
-        if ch == '"' && NAMESPACE.chars().all(|c| Some(c) == crs.next()) {
-            let mut skip_w = crs.skip_while(|&c| c != '"');
-            skip_w.next();
-            let result: String = skip_w.take_while(|&c| c != '"').collect();
-            return Some(result);
-        }
-    }
-    None
-}
-
 const SEED: u64 = 32;
+
 #[inline]
 fn hash_uri(url: &Url) -> u64 {
     museair::bfast::hash(url.path().as_bytes(), SEED)
 }
 
 struct Backend {
-    client:            Client,
-    log:               Arc<LoggerHandle>,
-    completers:        DashMap<u64, Completer>,
-    lang:              Mutex<Arc<str>>,
-    pub(crate) parser: Parser,
+    client: Client,
+    log: Arc<LoggerHandle>,
+    lang: Mutex<Arc<str>>,
+    pub(crate) completer: Completer,
 }
 
 #[tower_lsp::async_trait]
@@ -103,7 +86,7 @@ impl LanguageServer for Backend {
             }
         }
         let client_lang = init_config.get("locale").unwrap();
-        trace!("client lang is {}", json!(client_lang));
+        trace!("client lang is {:?}", client_lang);
         *self.lang.lock().await = Arc::from(client_lang.as_str().unwrap());
 
         if let Some(root_url) = param.root_uri
@@ -124,12 +107,11 @@ impl LanguageServer for Backend {
             filters: file_operation_filters,
         };
         Ok(InitializeResult {
-            server_info:     Some(ServerInfo {
+            server_info: Some(ServerInfo {
                 name:    "jsonui support".to_string(),
                 version: None,
             }),
-            offset_encoding: None,
-            capabilities:    ServerCapabilities {
+            capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::INCREMENTAL,
                 )),
@@ -173,19 +155,6 @@ impl LanguageServer for Backend {
         })
     }
 
-    async fn document_color(&self, params: DocumentColorParams) -> Result<Vec<ColorInformation>> {
-        let url = &params.text_document.uri;
-        let hash_value = hash_uri(url);
-
-        let cmp_v = self.completers.get(&hash_value);
-        if let Some(vv) = cmp_v {
-            if let Some(result) = vv.complete_color(self).await {
-                return Ok(result);
-            }
-        }
-        Ok(vec![])
-    }
-
     async fn color_presentation(
         &self,
         params: ColorPresentationParams,
@@ -214,139 +183,107 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> Result<()> {
-        self.completers.clear();
-        self.parser.close();
         Ok(())
     }
 
-    // trigger in file change
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let url = &params.text_document.uri;
         let key = hash_uri(url);
-        if let Some(cmp) = self.completers.get(&key) {
-            cmp.update_document(&params).await;
-        }
+        self.completer.update_document(key, &params).await;
     }
 
-    /// do insert namespace and cache_type map for save file
-    async fn did_save(&self, params: DidSaveTextDocumentParams) {
-        self.parser
-            .process_workspace_file_by_url(&params.text_document.uri)
-            .await;
-    }
-
-    /// do insert namespace and cache_type map for create file
     async fn did_create_files(&self, params: CreateFilesParams) {
         for i in params.files.iter() {
             if let Ok(url) = Url::parse(&i.uri) {
-                self.parser.process_workspace_file_by_url(&url).await;
+                let hash_value = hash_uri(&url);
+                if let Ok(content) = std::fs::read_to_string(url.path()) {
+                    self.completer
+                        .did_open(hash_value, Arc::from(content.as_str()))
+                        .await;
+                }
             }
         }
     }
 
-    /// do udpate namespace map for rename file
     async fn did_rename_files(&self, params: RenameFilesParams) {
-        let idmap = &self.parser.id_2_namespace_map;
         for i in params.files.iter() {
             if let Ok(o_url) = Url::parse(&i.old_uri)
                 && let Ok(n_url) = Url::parse(&i.new_uri)
             {
                 let ho = hash_uri(&o_url);
                 let hn = hash_uri(&n_url);
-                if let Some((_, v)) = idmap.remove(&ho) {
-                    idmap.insert(hn, v);
-                }
+                self.completer.did_rename(ho, hn);
             }
         }
     }
 
-    /// do clean namespace and cache_type map for delete file
     async fn did_delete_files(&self, params: DeleteFilesParams) {
         for i in params.files.iter() {
             if let Ok(url) = Url::parse(&i.uri) {
                 let x = hash_uri(&url);
-                if let Some((_, v)) = self.parser.id_2_namespace_map.remove(&x) {
-                    self.parser.cache_type_map.remove(v.as_ref());
-                }
+                self.completer.did_close(x);
             }
         }
     }
 
-    /// do insert namespace and completers for open file
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         if params.text_document.language_id != "json" {
             return;
         }
-        trace!("open {}", json!(params.text_document.uri));
-        let content: String = params.text_document.text.as_str().chars().collect();
-        let arc_content: Arc<str> = Arc::from(content);
-
-        let url = &params.text_document.uri;
-        if let Ok(()) = self.insert_namespace_by_content(url, arc_content.clone()).await {
-            let hash_value = hash_uri(url);
-            let new_cmp = Completer::new(arc_content);
-            self.completers.entry(hash_value).or_insert(new_cmp);
-        }
+        trace!("open {:?}", params.text_document.uri);
+        let arc_content: Arc<str> = Arc::from(params.text_document.text.as_str());
+        let hash_value = hash_uri(&params.text_document.uri);
+        self.completer.did_open(hash_value, arc_content).await;
     }
 
     /// do clean completer for close file
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let url = &params.text_document.uri;
-        trace!("close {}", json!(url));
+        trace!("close {}", url);
         let hash_value = hash_uri(url);
-        self.completers.remove(&hash_value);
+        self.completer.did_close(hash_value);
+    }
+
+    async fn document_color(&self, params: DocumentColorParams) -> Result<Vec<ColorInformation>> {
+        let url = &params.text_document.uri;
+        let id = hash_uri(url);
+        let r = self.completer.complete_color(id).await;
+        if let Some(r) = r {
+            Ok(r)
+        } else {
+            Ok(vec![])
+        }
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let url = &params.text_document_position.text_document.uri;
-        let hash_value = hash_uri(url);
-
-        let cmp_v = self.completers.get(&hash_value);
-        if let Some(vv) = cmp_v {
-            if let Some(result) = vv.compelte(self, &params).await {
-                return Ok(Some(CompletionResponse::Array(result)));
-            }
+        let id = hash_uri(url);
+        let l = self.lang.lock().await;
+        let r = self.completer.complete(id, l.clone(), &params).await;
+        if let Some(r) = r {
+            Ok(Some(CompletionResponse::Array(r)))
+        } else {
+            Ok(None)
         }
-        Ok(None)
     }
 }
 
 impl Backend {
-    async fn init_workspace(&self, workspace_folders: PathBuf) {}
-
-    async fn insert_namespace_by_content(&self, url: &Url, content: Arc<str>) -> Result<()> {
-        let hash_value = hash_uri(url);
-
-        let namespace_op = get_namespace(content);
-        if let Some(v) = namespace_op {
-            self.parser
-                .id_2_namespace_map
-                .entry(hash_value)
-                .or_insert(Arc::from(v));
-            return Ok(());
-        }
-        Err(Self::namespace_not_find_error(self, url.path()))
-    }
-
-    fn namespace_not_find_error(&self, path: &str) -> Error {
-        let e: ErrorCode = ErrorCode::ServerError(-35001);
-        Error {
-            code:    e,
-            message: Cow::Owned(format!("cant find namespace from {}", path)),
-            data:    None,
-        }
+    async fn init_workspace(&self, workspace_folders: PathBuf) {
+        self.completer.init(&workspace_folders).await;
     }
 }
 
-fn extract_keyword_from_json(keys: &[&str], json_map: &HashMap<String, Value>) -> HashSet<String> {
+fn extract_keyword_from_json(
+    keys: &[&str],
+    json_map: &HashMap<String, lexer::Token>,
+) -> HashSet<String> {
     let mut keyword = HashSet::new();
     for key in keys {
         if let Some(value) = json_map.get(*key) {
-            if let Some(array) = value.as_array() {
-                for item in array {
-                    if let Some(string_value) = item.as_str() {
-                        keyword.insert(string_value.to_string());
-                    }
+            if let Some(v) = lexer::to_array_ref(value) {
+                for item in v {
+                    keyword.insert(lexer::to_string_ref(item));
                 }
             }
         }
@@ -354,36 +291,76 @@ fn extract_keyword_from_json(keys: &[&str], json_map: &HashMap<String, Value>) -
     keyword
 }
 
-#[tokio::main]
-async fn main() {
-    let stdin = tokio::io::stdin();
-    let stdout = tokio::io::stdout();
-    let log: flexi_logger::LoggerHandle = Logger::with(LogSpecification::info()).start().unwrap();
-
-    let json_value: Value = serde_json::from_str(VANILLAPACK_DEFINE).unwrap();
-
-    let cache_type_map = DashMap::with_shard_amount(2);
-    if let Some(json_object) = json_value.as_object() {
-        for (key, value) in json_object {
-            let inner_map: HashMap<String, String> = value
-                .as_object()
-                .unwrap() // Handle None similarly for nested map
-                .into_iter()
-                .map(|(inner_key, inner_value)| {
-                    (inner_key.to_string(), inner_value.as_str().unwrap_or_default().to_string())
-                })
-                .collect();
-            cache_type_map.insert(key.to_string(), inner_map);
+pub(crate) async fn load_completer() -> Completer {
+    let mut pool = Rodeo::default();
+    let r = lexer::parse_full(VANILLAPACK_DEFINE).await;
+    let vanilla_controls_tabel = match r {
+        Some((_, r)) => {
+            let mut result =
+                HashMap::<(lasso::Spur, lasso::Spur), completer::PooledControlDefine>::new();
+            let m = lexer::to_map(r);
+            for (k1, v) in m {
+                if let lexer::Token::Object(_, v) = v {
+                    let m = lexer::to_map(v.unwrap());
+                    for (k2, v) in m {
+                        if let lexer::Token::Object(_, v) = v {
+                            let m = lexer::to_map(v.unwrap());
+                            let k1_spur = pool.get_or_intern(k1.as_str());
+                            let k2_spur = pool.get_or_intern(k2.as_str());
+                            let tuple = (k1_spur, k2_spur);
+                            let type_spur = if let Some(lexer::Token::Str(_, v)) = m.get("type") {
+                                pool.get_or_intern(v.as_str())
+                            } else {
+                                trace!("cant find type for {:?}", m);
+                                pool.get_or_intern("")
+                            };
+                            let variables = if let Some(v) = m.get("variables")
+                                && let lexer::Token::Array(_, v) = v
+                            {
+                                let mut r = HashSet::new();
+                                for i in v.as_ref().unwrap() {
+                                    if let lexer::Token::Str(_, v) = i {
+                                        r.insert(pool.get_or_intern(v.as_str()));
+                                    }
+                                }
+                                r
+                            } else {
+                                HashSet::new()
+                            };
+                            result.insert(
+                                tuple,
+                                completer::PooledControlDefine {
+                                    name: k2_spur,
+                                    extend: None,
+                                    type_n: Some(type_spur),
+                                    variables,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+            result
         }
-    }
+        None => {
+            panic!("error in load vanilla pack definition.")
+        }
+    };
 
-    let jsonui_define: serde_json::Value = serde_json::from_str(JSONUI_DEFINE).unwrap();
-    let obj = jsonui_define.as_object().ok_or("Expected a JSON object").unwrap();
-    let mut jsonui_define_map: HashMap<String, serde_json::Value> = HashMap::new();
-    for (key, value) in obj {
-        jsonui_define_map.insert(key.to_string(), value.clone());
-    }
+    let resolver: lasso::RodeoResolver = pool.into_resolver();
+    let vanilla_controls_tabel = vanilla_controls_tabel
+        .into_iter()
+        .map(|(k, v)| {
+            let (v1, v2) = k;
+            let v = v.to(&resolver);
+            ((Arc::from(resolver.resolve(&v1)), Arc::from(resolver.resolve(&v2))), v)
+        })
+        .collect();
 
+    let jsonui_define = crate::lexer::parse_full(JSONUI_DEFINE)
+        .await
+        .expect("can parse jsonui_define.json");
+    let jsonui_define_map: HashMap<String, lexer::Token> = lexer::to_map(jsonui_define.1);
     let keys = [
         "common",
         "bindings_properties",
@@ -410,36 +387,23 @@ async fn main() {
         "custom",
     ];
     let keyword = extract_keyword_from_json(&keys, &jsonui_define_map);
+    Completer::new(keyword, vanilla_controls_tabel, jsonui_define_map)
+}
 
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
+    let stdin = tokio::io::stdin();
+    let stdout = tokio::io::stdout();
+    let log: flexi_logger::LoggerHandle = Logger::with(LogSpecification::info()).start().unwrap();
+
+    let completer = load_completer().await;
     let (service, socket) = LspService::build(|client| Backend {
         client,
         log: Arc::new(log),
-        completers: DashMap::with_shard_amount(2),
         lang: Mutex::new(Arc::from("zh-cn")),
-        parser: Parser::new(cache_type_map, jsonui_define_map, DashMap::with_shard_amount(2), keyword),
+        completer,
     })
     .finish();
+    info!("starting server...");
     Server::new(stdin, stdout, socket).serve(service).await;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_get_namespace_esay() {
-        let result = get_namespace(Arc::from(r#"{"namespace": "test"}"#)).unwrap();
-        let expect = "test";
-        assert_eq!(result, expect);
-    }
-
-    #[test]
-    fn test_get_namespace_hard() {
-        let result = get_namespace(Arc::from(
-            r#"// this is comment{"test_control": {"type": "panel"},"namespace": "test"}"#,
-        ))
-        .unwrap();
-        let expect = "test";
-        assert_eq!(result, expect);
-    }
 }

@@ -1,10 +1,10 @@
 .cargo
-.vscode
 .github
+.vscode
 client/**
 node_modules
-out
 resources
+out
 .idea
 src
 target
@@ -14,5 +14,7 @@ vanillapack_define_gen
 Cargo.lock
 Cargo.toml
 pnpm-lock.yaml
+rust-toolchain
+rustfmt.toml
 tsconfig.json
 webpack.config.js

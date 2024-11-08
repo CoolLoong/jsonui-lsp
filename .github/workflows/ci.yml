@@ -70,7 +70,12 @@ jobs:
           TARGET: ${{ matrix.rust_target }}
       - shell: pwsh
         run: echo "target=${{ matrix.platform }}-${{ matrix.arch }}" >> $env:GITHUB_ENV
-      - run: npx vsce package --target ${{ env.target }}
+      - run: |
+          if [[ "${{ github.event.head_commit.message }}" == *"-pre"* ]]; then
+            npx vsce package --pre-release --target ${{ env.target }}
+          else
+            npx vsce package --target ${{ env.target }}
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.target }}
@@ -82,6 +87,11 @@ jobs:
     if: success() && startsWith( github.ref, 'refs/tags/')
     steps:
       - uses: actions/download-artifact@v4
-      - run: npx vsce publish --packagePath $(find . -iname *.vsix)
+      - run: |
+          if [[ "${{ github.event.head_commit.message }}" == *"-pre"* ]]; then
+            npx vsce publish --pre-release --packagePath $(find . -iname *.vsix)
+          else
+            npx vsce publish --packagePath $(find . -iname *.vsix)
+          fi
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
