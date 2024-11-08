@@ -11,7 +11,8 @@
       "group": "build",
       "presentation": {
         "panel": "dedicated",
-        "reveal": "silent"
+        "reveal": "silent",
+        "close": true
       },
       "problemMatcher": ["$tsc-watch"]
     },
@@ -22,7 +23,8 @@
       "group": "build",
       "presentation": {
         "panel": "dedicated",
-        "reveal": "silent"
+        "reveal": "silent",
+        "close": true
       },
       "problemMatcher": ["$rustc"]
     },
