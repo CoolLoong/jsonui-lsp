@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
-use tower_lsp::lsp_types::{DidChangeTextDocumentParams, Position};
 use unicode_segmentation::UnicodeSegmentation;
+
+use crate::tower_lsp::*;
 
 #[derive(Debug)]
 pub struct Document {
@@ -117,7 +118,7 @@ impl Document {
         let content = self.chars.lock().await;
         let (forward, backward) = content.split_at(index);
         #[cfg(feature = "debug-parse")]
-        trace!("before {:?} | after {:?}",forward, backward);
+        trace!("before {:?} | after {:?}", forward, backward);
         if forward.is_empty() || backward.is_empty() {
             return None;
         }
@@ -266,7 +267,6 @@ impl Document {
 
 #[cfg(test)]
 mod tests {
-
     use tower_lsp::lsp_types::{
         Range, TextDocumentContentChangeEvent, Url, VersionedTextDocumentIdentifier,
     };

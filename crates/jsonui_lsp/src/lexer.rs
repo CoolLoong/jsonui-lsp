@@ -17,7 +17,7 @@ pub enum TokenChar {
     Comma = ',' as isize,
     Colon = ':' as isize,
     Quote = '"' as isize,
-    OTHER = '🤪' as isize,
+    Other = '🤪' as isize,
 }
 
 impl From<&str> for TokenChar {
@@ -32,7 +32,7 @@ impl From<&str> for TokenChar {
             "," => TokenChar::Comma,
             ":" => TokenChar::Colon,
             "\"" => TokenChar::Quote,
-            _ => TokenChar::OTHER,
+            _ => TokenChar::Other,
         }
     }
 }
@@ -486,7 +486,6 @@ pub(crate) async fn parse_full(input: &str) -> Option<((usize, usize), Vec<Token
 
 pub(crate) async fn parse(range: Option<(usize, usize)>, input: &str) -> Option<Vec<Token>> {
     let doc = Document::from(Arc::from(input));
-
     Lexer::new().parse(range, &doc).await
 }
 
@@ -615,7 +614,7 @@ pub(crate) fn to_number(token: Token) -> f32 {
     if let Token::Num(_, v) = token {
         v
     } else {
-        0 as f32
+        0f32
     }
 }
 
@@ -623,15 +622,15 @@ pub(crate) fn to_number_ref(token: &Token) -> f32 {
     if let Token::Num(_, v) = token {
         *v
     } else {
-        0 as f32
+        0f32
     }
 }
 
 #[allow(unused_imports)]
 pub(crate) mod prelude {
     pub(crate) use super::{
-        parse, parse_full, to_array, to_array_ref, to_bool, to_bool_ref, to_map, to_map_ref, to_number,
-        to_number_ref, to_string, to_string_ref, Token,
+        parse_full, to_array_ref, to_map_ref,
+        to_number_ref, to_string_ref, Token,
     };
 }
 
@@ -641,14 +640,14 @@ mod tests {
 
     use crate::document::Document;
     use crate::lexer::{to_num_array, Lexer, Token};
-    use crate::{JSONUI_DEFINE, VANILLAPACK_DEFINE};
+    use crate::{JSONUI_DEFINE, VANILLA_PACK_DEFINE};
 
     #[tokio::test]
     async fn test_parse_full_1() -> Result<(), Box<dyn std::error::Error>> {
         let r = Lexer::new();
         let input = include_str!("../test/achievement.json");
         let doc = Document::from(Arc::from(input));
-        
+
         crate::tests::setup_logger();
         let r = r.parse(None, &doc).await;
         if let Some(r) = r
@@ -669,8 +668,8 @@ mod tests {
     #[tokio::test]
     async fn test_parse_full_2() -> Result<(), Box<dyn std::error::Error>> {
         let r = Lexer::new();
-        let doc = Document::from(Arc::from(VANILLAPACK_DEFINE));
-        
+        let doc = Document::from(Arc::from(VANILLA_PACK_DEFINE));
+
         crate::tests::setup_logger();
         let r = r.parse(None, &doc).await;
         if let Some(r) = r
@@ -691,7 +690,7 @@ mod tests {
     async fn test_parse_full_3() -> Result<(), Box<dyn std::error::Error>> {
         let r = Lexer::new();
         let doc = Document::from(Arc::from(JSONUI_DEFINE));
-        
+
         crate::tests::setup_logger();
         let r = r.parse(None, &doc).await;
         if let Some(r) = r
@@ -724,7 +723,7 @@ mod tests {
   }
 }"#,
         ));
-        
+
         crate::tests::setup_logger();
         let r = r.parse(None, &doc).await;
         if let Some(r) = r
@@ -750,7 +749,7 @@ mod tests {
             "test" : "exxx"
             }"#,
         ));
-        
+
         crate::tests::setup_logger();
         let r = r.parse(None, &doc).await;
         if let Some(r) = r
@@ -782,7 +781,7 @@ mod tests {
                 "namespace": "test"
             }"#,
         ));
-        
+
         crate::tests::setup_logger();
         let r = r.parse(None, &doc).await;
         if let Some(r) = r
@@ -809,7 +808,7 @@ mod tests {
     "color": [0.941, 0.941, 0.035, 0.623]
   },"#,
         ));
-        
+
         crate::tests::setup_logger();
         let r = r.parse(None, &doc).await;
         if let Some(r) = r

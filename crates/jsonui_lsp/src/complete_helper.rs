@@ -2,20 +2,17 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use log::trace;
-use tower_lsp::lsp_types::{
-    Color, ColorInformation, CompletionItem, CompletionItemKind, CompletionItemLabelDetails,
-    CompletionTextEdit, InsertTextFormat, Position, Range, TextEdit,
-};
 
 use crate::completer::{AutoTree, Completer, ControlNode};
 use crate::document::Document;
 use crate::lexer::prelude::*;
+use crate::tower_lsp::*;
 use crate::tree_ds::prelude::{AutomatedId, Node};
 
 const BIND: &str = "bindings";
 const CONTROLS: &str = "controls";
 
-pub(crate) async fn color(doc: &Document, tokens: &Vec<Token>) -> Option<Vec<ColorInformation>> {
+pub(crate) async fn color(doc: &Document, tokens: &[Token]) -> Option<Vec<ColorInformation>> {
     let mut color_infos = Vec::new();
     let tokens = flatten_tokens(tokens);
     let mut iter = tokens.iter();
@@ -53,7 +50,7 @@ pub(crate) fn normal(
     pos: Position,
     char: Arc<str>,
     lang: Arc<str>,
-    tokens: &Vec<Token>,
+    tokens: &[Token],
     tree: &AutoTree<ControlNode>,
     define_map: &HashMap<String, Token>,
 ) -> Option<Vec<CompletionItem>> {
@@ -87,7 +84,7 @@ pub(crate) fn normal(
             match str.as_str() {
                 CONTROLS => {}
                 BIND if char.as_ref() == "\""
-                    && matches!(current, Some(_))
+                    && current.is_some()
                     && matches!(current.unwrap(), Token::Str(_, str) if str.is_empty()) =>
                 {
                     trace!("create_bindings_type_completion");
@@ -172,11 +169,11 @@ fn create_binding_type_input<'a>(
     let mut in_binding = false;
     for binding in bindings {
         if let Token::Object(pos, Some(binding)) = binding {
-            let cpos = current.pos();
+            let c_pos = current.pos();
             if pos.0 <= index && index <= pos.1 {
                 in_binding = true;
             }
-            if pos.0 <= cpos.0 && cpos.1 <= pos.1 {
+            if pos.0 <= c_pos.0 && c_pos.1 <= pos.1 {
                 trace!("find binding {:?}", binding);
                 if let Some(Token::Str(_, type_v)) =
                     binding.iter().enumerate().find_map(|(index, token)| {
@@ -210,11 +207,11 @@ fn create_binding_type_input<'a>(
 fn create_variables_completion(
     completer: &Completer,
     n: Node<AutomatedId, ControlNode>,
-) -> std::collections::HashSet<Arc<str>> {
+) -> HashSet<Arc<str>> {
     if let Some(v) = n.get_value()
         && let Some(extend) = &v.define.extend
     {
-        let extend_v = completer.find_extend_value(&extend);
+        let extend_v = completer.find_extend_value(extend);
         if let Some(extend_v) = extend_v {
             let vars = v.define.variables.lock().unwrap();
             let mut r = vars.clone();
@@ -225,7 +222,7 @@ fn create_variables_completion(
     HashSet::default()
 }
 
-fn find_neighbors_token<'a>(flatted_tokens: &Vec<&'a Token>, index: usize) -> Vec<Option<&'a Token>> {
+fn find_neighbors_token<'a>(flatted_tokens: &[&'a Token], index: usize) -> Vec<Option<&'a Token>> {
     let closed_index = flatted_tokens
         .iter()
         .map(|v| match v {
@@ -256,22 +253,13 @@ fn find_neighbors_token<'a>(flatted_tokens: &Vec<&'a Token>, index: usize) -> Ve
 }
 
 pub fn boundary_tokens<'a>(
-    tokens: &'a Vec<&'a Token>,
+    tokens: &'a [&'a Token],
     boundary_indices: (usize, usize),
 ) -> Vec<&'a Token> {
     tokens
         .iter()
         .filter_map(|token| {
-            let range = match token {
-                Token::Bool(pos, _)
-                | Token::Str(pos, _)
-                | Token::Num(pos, _)
-                | Token::Colon(pos)
-                | Token::Comma(pos)
-                | Token::Array(pos, _)
-                | Token::Object(pos, _) => pos,
-                Token::Null() => return None,
-            };
+            let range = token.pos();
             let r = boundary_indices.0 <= range.0 && range.1 <= boundary_indices.1;
             if r {
                 Some(*token)
@@ -282,7 +270,7 @@ pub fn boundary_tokens<'a>(
         .collect()
 }
 
-pub fn flatten_tokens(tokens: &Vec<Token>) -> Vec<&Token> {
+pub fn flatten_tokens(tokens: &[Token]) -> Vec<&Token> {
     let mut result = Vec::new();
     for token in tokens.iter() {
         match token {
@@ -473,24 +461,24 @@ pub(crate) fn from_color_value_to_color_arr(v: &Token) -> Option<Color> {
             && v3 >= 0.0
             && v3 <= 1.0
         {
-            if color_arr.len() == 7
+            return if color_arr.len() == 7
                 && let Token::Num(_, v4) = color_arr[6]
                 && v4 >= 0.0
                 && v4 <= 1.0
             {
-                return Some(Color {
-                    red:   v1,
+                Some(Color {
+                    red: v1,
                     green: v2,
-                    blue:  v3,
+                    blue: v3,
                     alpha: v4,
-                });
+                })
             } else {
-                return Some(Color {
-                    red:   v1,
+                Some(Color {
+                    red: v1,
                     green: v2,
-                    blue:  v3,
+                    blue: v3,
                     alpha: 1.0,
-                });
+                })
             }
         }
     }
@@ -504,7 +492,7 @@ fn create_value_completion(
     lang: Arc<str>,
     property: &str,
     define_map: &HashMap<String, Token>,
-    extra_values: &std::collections::HashSet<Arc<str>>,
+    extra_values: &HashSet<Arc<str>>,
 ) -> Option<Vec<CompletionItem>> {
     let mut result = Vec::new();
     let c = char.as_ref();
@@ -518,8 +506,8 @@ fn create_value_completion(
     if let Some(v) = define_map.get(property)
         && let Token::Object(_, v) = v
     {
-        let properies = to_map_ref(v.as_ref().unwrap());
-        if let Some(Token::Array(_, values)) = properies.get("values") {
+        let properties = to_map_ref(v.as_ref().unwrap());
+        if let Some(Token::Array(_, values)) = properties.get("values") {
             for (index, v) in values.as_ref().unwrap().iter().enumerate() {
                 let v = if let Token::Object(_, v) = v {
                     v.as_ref().unwrap()
@@ -603,12 +591,12 @@ fn create_value_completion(
         }
     }
 
-    //completion variables
+    // completion variables
     for i in extra_values {
         let mut insert_text = None;
         let mut text_edit = None;
         if is_colon {
-            insert_text = Some(format!(" \"{}\"{}", i.to_string(), suffix))
+            insert_text = Some(format!(" \"{}\"{}", i, suffix))
         } else {
             text_edit = Some(CompletionTextEdit::Edit(TextEdit {
                 range:    Range {
@@ -618,7 +606,7 @@ fn create_value_completion(
                         character: pos.character + 1,
                     },
                 },
-                new_text: format!("{}\"{}", i.to_string(), suffix),
+                new_text: format!("{}\"{}", i, suffix),
             }))
         }
         result.push(CompletionItem {

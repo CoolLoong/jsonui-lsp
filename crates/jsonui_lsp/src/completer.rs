@@ -11,14 +11,11 @@ use std::{fs, vec};
 use dashmap::DashMap;
 use lasso::Spur;
 use log::trace;
-use tower_lsp::lsp_types::{
-    ColorInformation, CompletionItem, CompletionParams, DidChangeTextDocumentParams,
-};
 use walkdir::WalkDir;
 
 use crate::document::Document;
 use crate::lexer::prelude::*;
-use crate::lexer::to_map_ref;
+use crate::tower_lsp::*;
 use crate::tree_ds::prelude::*;
 use crate::StdMutex;
 
@@ -45,7 +42,7 @@ pub(crate) struct PooledControlDefine {
     pub(crate) name:      Spur,
     pub(crate) extend:    Option<(Spur, Spur)>,
     pub(crate) type_n:    Option<Spur>,
-    pub(crate) variables: std::collections::HashSet<Spur>,
+    pub(crate) variables: HashSet<Spur>,
 }
 impl PooledControlDefine {
     pub(crate) fn to(&self, resolver: &lasso::RodeoResolver) -> ControlDefine {
@@ -75,7 +72,7 @@ pub(crate) struct ControlDefine {
     pub(crate) name:      Arc<str>,
     pub(crate) extend:    Option<(Arc<str>, Arc<str>)>,
     pub(crate) type_n:    Mutex<Option<Arc<str>>>,
-    pub(crate) variables: Mutex<std::collections::HashSet<Arc<str>>>,
+    pub(crate) variables: Mutex<HashSet<Arc<str>>>,
 }
 impl Clone for ControlDefine {
     fn clone(&self) -> Self {
@@ -99,7 +96,7 @@ impl PartialEq for ControlDefine {
     }
 }
 impl Eq for ControlDefine {}
-impl fmt::Display for ControlDefine {
+impl Display for ControlDefine {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let type_n = self.type_n.lock().expect("Failed to lock type_n");
         let variables = self.variables.lock().expect("Failed to lock variables");
@@ -135,7 +132,7 @@ pub(crate) struct BuildTreeContext {
 #[derive(Debug)]
 pub(crate) struct RecursiveSearchContext {
     type_n:    RefCell<Option<Arc<str>>>,
-    variables: RefCell<std::collections::HashSet<Arc<str>>>,
+    variables: RefCell<HashSet<Arc<str>>>,
     layer:     AtomicUsize,
 }
 impl RecursiveSearchContext {
@@ -148,7 +145,7 @@ impl RecursiveSearchContext {
     }
 }
 
-fn find_namespace(tokens: &Vec<Token>) -> Option<String> {
+fn find_namespace(tokens: &[Token]) -> Option<String> {
     tokens
         .iter()
         .enumerate()
@@ -197,32 +194,21 @@ fn split_control_name(name: &str, def_namespace: &str) -> (Rc<str>, Rc<str>, Rc<
     (Rc::from(part1), Rc::from(part2), Rc::from(part3))
 }
 
-fn join(arcs: &[Arc<str>]) -> String {
-    arcs.iter().map(|s| s.as_ref()).collect::<Vec<&str>>().join("")
-}
-
-fn extract_prefix(input: &str) -> &str {
-    match input.find('@') {
-        Some(index) => &input[..index],
-        None => input,
-    }
-}
-
 pub struct Completer {
     pub(crate) trees:       RwLock<HashMap<Arc<str>, AutoTree<ControlNode>>>,
     documents:              DashMap<u64, Document>,
-    vanilla_controls_tabel: HashMap<(Arc<str>, Arc<str>), ControlDefine>,
+    vanilla_controls_table: HashMap<(Arc<str>, Arc<str>), ControlDefine>,
     jsonui_define:          HashMap<String, Token>,
 }
 impl Completer {
     pub fn new(
-        vanilla_controls_tabel: HashMap<(Arc<str>, Arc<str>), ControlDefine>,
+        vanilla_controls_table: HashMap<(Arc<str>, Arc<str>), ControlDefine>,
         jsonui_define: HashMap<String, Token>,
     ) -> Self {
         Completer {
             trees: RwLock::new(HashMap::new()),
             documents: DashMap::with_shard_amount(2),
-            vanilla_controls_tabel,
+            vanilla_controls_table,
             jsonui_define,
         }
     }
@@ -405,7 +391,7 @@ impl Completer {
         let np = find_namespace(tokens);
         if let Some(np) = np {
             let mut tr: Tree<AutomatedId, ControlNode> =
-                AutoTree::<ControlNode>::new(Option::Some(np.as_str()));
+                AutoTree::<ControlNode>::new(Some(np.as_str()));
             let ctx = BuildTreeContext {
                 namespace:    Rc::from(np.as_ref()),
                 control_name: RefCell::new(Rc::from("()")),
@@ -418,7 +404,7 @@ impl Completer {
                     name:      Arc::from("root"),
                     extend:    None,
                     type_n:    Mutex::new(None),
-                    variables: Mutex::new(std::collections::HashSet::<Arc<str>>::new()),
+                    variables: Mutex::new(HashSet::<Arc<str>>::new()),
                 },
                 loc:    *root_span,
             };
@@ -445,7 +431,7 @@ impl Completer {
             let (name, np, extend) =
                 split_control_name(ctx.control_name.borrow().as_ref(), ctx.namespace.as_ref());
             let mut type_n = None;
-            let mut variables = std::collections::HashSet::<Arc<str>>::new();
+            let mut variables = HashSet::<Arc<str>>::new();
             let mut arrays = vec![];
 
             for (k, v) in m {
@@ -527,7 +513,7 @@ impl Completer {
                 }
             }
         } else {
-            let r = self.vanilla_controls_tabel.get(extend);
+            let r = self.vanilla_controls_table.get(extend);
             if let Some(r) = r {
                 {
                     let type_n = r.type_n.lock().expect("type_n lock error");
@@ -548,7 +534,7 @@ impl Completer {
     pub(crate) fn find_extend_value(
         &self,
         extend: &(Arc<str>, Arc<str>),
-    ) -> Option<(Arc<str>, std::collections::HashSet<Arc<str>>)> {
+    ) -> Option<(Arc<str>, HashSet<Arc<str>>)> {
         let ctx = RecursiveSearchContext::new();
         self.recursive_search(extend, &ctx);
         if let Some(type_n) = ctx.type_n.take() {
@@ -588,8 +574,6 @@ impl Completer {
 
 #[cfg(test)]
 mod tests {
-    use flexi_logger::{FileSpec, LogSpecification, Logger, LoggerHandle, WriteMode};
-
     use super::*;
 
     #[test]
@@ -615,13 +599,5 @@ mod tests {
         for (_, v) in trees.iter() {
             println!("tree {} \n------------", v);
         }
-    }
-
-    fn setup_logger() -> LoggerHandle {
-        Logger::with(LogSpecification::trace())
-            .log_to_file(FileSpec::default().directory("../../logs").basename("debug"))
-            .write_mode(WriteMode::Direct)
-            .start()
-            .unwrap()
     }
 }

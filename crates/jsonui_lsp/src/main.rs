@@ -7,6 +7,12 @@ mod generator;
 mod lexer;
 mod tree_ds;
 
+pub(crate) mod tower_lsp {
+    pub(crate) use tower_lsp::{
+        async_trait, jsonrpc::Result, lsp_types::*, Client, LanguageServer, LspService, Server,
+    };
+}
+
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -16,13 +22,11 @@ use flexi_logger::{LogSpecification, Logger, LoggerHandle};
 use lasso::Rodeo;
 use log::{info, set_max_level, trace};
 use tokio::sync::Mutex;
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::*;
-use tower_lsp::{Client, LanguageServer, LspService, Server};
+use tower_lsp::*;
 
 type StdMutex<T> = std::sync::Mutex<T>;
 
-const VANILLAPACK_DEFINE: &str = include_str!("resources/vanillapack_define_1.21.40.3.json");
+const VANILLA_PACK_DEFINE: &str = include_str!("resources/vanillapack_define_1.21.40.3.json");
 const JSONUI_DEFINE: &str = include_str!("resources/jsonui_define.json");
 const SEED: u64 = 32;
 
@@ -38,7 +42,7 @@ struct Backend {
     pub(crate) completer: Completer,
 }
 
-#[tower_lsp::async_trait]
+#[async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, param: InitializeParams) -> Result<InitializeResult> {
         let init_config = &param.initialization_options.unwrap();
@@ -276,8 +280,8 @@ impl Backend {
 
 pub(crate) async fn load_completer() -> Completer {
     let mut pool = Rodeo::default();
-    let r = lexer::parse_full(VANILLAPACK_DEFINE).await;
-    let vanilla_controls_tabel = match r {
+    let r = lexer::parse_full(VANILLA_PACK_DEFINE).await;
+    let vanilla_controls_table = match r {
         Some((_, r)) => {
             let mut result =
                 HashMap::<(lasso::Spur, lasso::Spur), completer::PooledControlDefine>::new();
@@ -331,7 +335,7 @@ pub(crate) async fn load_completer() -> Completer {
     };
 
     let resolver: lasso::RodeoResolver = pool.into_resolver();
-    let vanilla_controls_tabel = vanilla_controls_tabel
+    let vanilla_controls_table = vanilla_controls_table
         .into_iter()
         .map(|(k, v)| {
             let (v1, v2) = k;
@@ -340,11 +344,11 @@ pub(crate) async fn load_completer() -> Completer {
         })
         .collect();
 
-    let jsonui_define = crate::lexer::parse_full(JSONUI_DEFINE)
+    let jsonui_define = lexer::parse_full(JSONUI_DEFINE)
         .await
         .expect("can parse jsonui_define.json");
     let jsonui_define_map: HashMap<String, lexer::Token> = lexer::to_map(jsonui_define.1);
-    Completer::new(vanilla_controls_tabel, jsonui_define_map)
+    Completer::new(vanilla_controls_table, jsonui_define_map)
 }
 
 #[tokio::main(flavor = "current_thread")]
