@@ -187,9 +187,8 @@ impl Lexer {
         matches!(ctx.current, ParseState::Escape)
     }
 
-    pub(crate) async fn parse(&self, pos: Option<(usize, usize)>, doc: &Document) -> Option<Vec<Token>> {
-        let chars = doc.chars.lock().await;
-
+    pub(crate) fn parse(&self, pos: Option<(usize, usize)>, doc: &Document) -> Option<Vec<Token>> {
+        let chars = doc.chars.lock();
         let (offset, input) = {
             if let Some((l, r)) = pos {
                 (l, &chars[l..r + 1])
@@ -472,9 +471,9 @@ impl Lexer {
     }
 }
 
-pub(crate) async fn parse_full(input: &str) -> Option<((usize, usize), Vec<Token>)> {
+pub(crate) fn parse_full(input: &str) -> Option<((usize, usize), Vec<Token>)> {
     let doc = Document::from(Arc::from(input));
-    let r = Lexer::new().parse(None, &doc).await;
+    let r = Lexer::new().parse(None, &doc);
     if let Some(mut r) = r
         && let Token::Object(info, v) = std::mem::replace(&mut r[0], Token::Null())
         && let Some(v) = v
@@ -485,9 +484,9 @@ pub(crate) async fn parse_full(input: &str) -> Option<((usize, usize), Vec<Token
     }
 }
 
-pub(crate) async fn parse(range: Option<(usize, usize)>, input: &str) -> Option<Vec<Token>> {
+pub(crate) fn parse(range: Option<(usize, usize)>, input: &str) -> Option<Vec<Token>> {
     let doc = Document::from(Arc::from(input));
-    Lexer::new().parse(range, &doc).await
+    Lexer::new().parse(range, &doc)
 }
 
 pub(crate) fn to_map(tokens: Vec<Token>) -> BfastHashMap<String, Token> {
@@ -666,14 +665,14 @@ mod tests {
     use crate::lexer::{to_num_array, Lexer, Token};
     use crate::{JSONUI_DEFINE, VANILLA_PACK_DEFINE};
 
-    #[tokio::test]
-    async fn test_parse_full_1() -> Result<(), Box<dyn std::error::Error>> {
+    #[test]
+    fn test_parse_full_1() -> Result<(), Box<dyn std::error::Error>> {
         let r = Lexer::new();
         let input = include_str!("../test/achievement.json");
         let doc = Document::from(Arc::from(input));
 
         crate::tests::setup_logger();
-        let r = r.parse(None, &doc).await;
+        let r = r.parse(None, &doc);
         if let Some(r) = r
             && let Token::Object(_, v) = r.first().unwrap()
         {
@@ -689,13 +688,13 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn test_parse_full_2() -> Result<(), Box<dyn std::error::Error>> {
+    #[test]
+    fn test_parse_full_2() -> Result<(), Box<dyn std::error::Error>> {
         let r = Lexer::new();
         let doc = Document::from(Arc::from(VANILLA_PACK_DEFINE));
 
         crate::tests::setup_logger();
-        let r = r.parse(None, &doc).await;
+        let r = r.parse(None, &doc);
         if let Some(r) = r
             && let Token::Object(_, v) = r.first().unwrap()
         {
@@ -710,13 +709,13 @@ mod tests {
         }
         Ok(())
     }
-    #[tokio::test]
-    async fn test_parse_full_3() -> Result<(), Box<dyn std::error::Error>> {
+    #[test]
+    fn test_parse_full_3() -> Result<(), Box<dyn std::error::Error>> {
         let r = Lexer::new();
         let doc = Document::from(Arc::from(JSONUI_DEFINE));
 
         crate::tests::setup_logger();
-        let r = r.parse(None, &doc).await;
+        let r = r.parse(None, &doc);
         if let Some(r) = r
             && let Token::Object(_, v) = r.first().unwrap()
         {
@@ -732,8 +731,8 @@ mod tests {
         Ok(())
     }
 
-    #[tokio::test]
-    async fn test_parse_1() {
+    #[test]
+    fn test_parse_1() {
         let r = Lexer::new();
         let doc = Document::from(Arc::from(
             r#"
@@ -749,7 +748,7 @@ mod tests {
         ));
 
         crate::tests::setup_logger();
-        let r = r.parse(None, &doc).await;
+        let r = r.parse(None, &doc);
         if let Some(r) = r
             && let Token::Object(_, v) = r.first().unwrap()
         {
@@ -764,8 +763,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_parse_2() {
+    #[test]
+    fn test_parse_2() {
         let r = Lexer::new();
         let doc = Document::from(Arc::from(
             r#"{
@@ -775,7 +774,7 @@ mod tests {
         ));
 
         crate::tests::setup_logger();
-        let r = r.parse(None, &doc).await;
+        let r = r.parse(None, &doc);
         if let Some(r) = r
             && let Token::Object(_, v) = r.first().unwrap()
         {
@@ -796,8 +795,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_parse_3() {
+    #[test]
+    fn test_parse_3() {
         let r = Lexer::new();
         let doc = Document::from(Arc::from(
             r#"{
@@ -807,7 +806,7 @@ mod tests {
         ));
 
         crate::tests::setup_logger();
-        let r = r.parse(None, &doc).await;
+        let r = r.parse(None, &doc);
         if let Some(r) = r
             && let Token::Object(_, v) = r.first().unwrap()
         {
@@ -823,8 +822,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_parse_4() {
+    #[test]
+    fn test_parse_4() {
         let r = Lexer::new();
         let doc = Document::from(Arc::from(
             r#""xxx":{
@@ -834,7 +833,7 @@ mod tests {
         ));
 
         crate::tests::setup_logger();
-        let r = r.parse(None, &doc).await;
+        let r = r.parse(None, &doc);
         if let Some(r) = r
             && let Token::Object(_, v) = r.get(2).unwrap()
         {

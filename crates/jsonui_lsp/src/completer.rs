@@ -1,24 +1,22 @@
 use std::borrow::Borrow;
-use std::cell::RefCell;
 use std::fmt::{self, Display};
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
-use std::sync::{Arc, RwLock};
-use std::{fs, vec};
+use std::sync::Arc;
+use std::vec;
 
 use dashmap::DashMap;
 use lasso::Spur;
 use log::trace;
-use tokio::sync::Mutex;
+use parking_lot::{Mutex, RwLock};
 use walkdir::WalkDir;
 
 use crate::document::Document;
 use crate::lexer::prelude::*;
 use crate::museair::{BfastDashMap, BfastHash, BfastHashMap, BfastHashSet};
-use crate::tower_lsp::*;
+use crate::towerlsp::*;
 use crate::tree_ds::prelude::*;
-use crate::StdMutex;
 
 pub(crate) type AutoTree<T> = Tree<AutomatedId, T>;
 pub(crate) type ControlName = (Arc<str>, Option<(Arc<str>, Arc<str>)>);
@@ -35,8 +33,11 @@ impl Display for ControlNode {
 }
 impl ControlNode {
     pub(crate) fn get_type(&self) -> Option<String> {
-        let lock = self.define.type_n.lock().expect("Failed to lock type_n");
-        lock.as_ref().map(|f| f.to_string())
+        if let Some(lock) = self.define.type_n.try_lock() {
+            lock.as_ref().map(|f| f.to_string())
+        } else {
+            None
+        }
     }
 }
 
@@ -62,8 +63,8 @@ impl PooledControlDefine {
             .collect();
         ControlDefine {
             name: (name, extend),
-            type_n: StdMutex::new(type_n),
-            variables: StdMutex::new(variables),
+            type_n: Mutex::new(type_n),
+            variables: Mutex::new(variables),
         }
     }
 }
@@ -71,15 +72,15 @@ impl PooledControlDefine {
 #[derive(Debug, Default)]
 pub(crate) struct ControlDefine {
     pub(crate) name: ControlName,
-    pub(crate) type_n: StdMutex<Option<Arc<str>>>,
-    pub(crate) variables: StdMutex<BfastHashSet<Arc<str>>>,
+    pub(crate) type_n: Mutex<Option<Arc<str>>>,
+    pub(crate) variables: Mutex<BfastHashSet<Arc<str>>>,
 }
 impl Clone for ControlDefine {
     fn clone(&self) -> Self {
         ControlDefine {
             name: Clone::clone(&self.name),
-            type_n: StdMutex::new(self.type_n.lock().expect("Failed to lock type_n").clone()),
-            variables: StdMutex::new(self.variables.lock().expect("Failed to lock variables").clone()),
+            type_n: Mutex::new(self.type_n.try_lock().expect("cant get type_n lock").clone()),
+            variables: Mutex::new(self.variables.try_lock().expect("cant get type_n lock").clone()),
         }
     }
 }
@@ -94,8 +95,8 @@ impl PartialEq for ControlDefine {
 impl Eq for ControlDefine {}
 impl Display for ControlDefine {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let type_n = self.type_n.lock().expect("Failed to lock type_n");
-        let variables = self.variables.lock().expect("Failed to lock variables");
+        let type_n = self.type_n.try_lock().expect("cant get type_n lock");
+        let variables = self.variables.try_lock().expect("cant get variables lock");
         let variables_str: String = format!("{:?}", variables);
         if variables_str.len() > 50 {
             write!(
@@ -130,15 +131,15 @@ pub(crate) struct BuildTreeContext {
 
 #[derive(Debug)]
 pub(crate) struct RecursiveSearchContext {
-    type_n:    RefCell<Option<Arc<str>>>,
-    variables: RefCell<BfastHashSet<Arc<str>>>,
+    type_n: Mutex<Option<Arc<str>>>,
+    variables: Mutex<BfastHashSet<Arc<str>>>,
     layer:     AtomicUsize,
 }
 impl RecursiveSearchContext {
     pub fn new() -> Self {
         RecursiveSearchContext {
-            type_n:    RefCell::new(None),
-            variables: RefCell::new(BfastHashSet::default()),
+            type_n: Mutex::new(None),
+            variables: Mutex::new(BfastHashSet::default()),
             layer:     AtomicUsize::new(0),
         }
     }
@@ -153,7 +154,7 @@ impl ControlNameSymbol {
 }
 
 pub struct Completer {
-    pub(crate) trees: RwLock<BfastHashMap<Arc<str>, AutoTree<ControlNode>>>,
+    pub(crate) trees: RwLock<BfastHashMap<Arc<str>, Arc<AutoTree<ControlNode>>>>,
     documents: BfastDashMap<Url, Arc<Document>>,
     caches: BfastDashMap<Arc<str>, Arc<Vec<Token>>>,
     urls: BfastDashMap<Arc<str>, Url>,
@@ -183,19 +184,21 @@ impl Completer {
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().map_or(false, |ext| ext == "json"))
         {
-            if let Ok(content) = fs::read_to_string(entry.path()) {
+            if let Ok(content) = tokio::fs::read_to_string(entry.path()).await {
                 let content = Arc::from(content.as_str());
-                let abs_path = fs::canonicalize(entry.path()).expect("Failed to get absolute path");
+                let abs_path = tokio::fs::canonicalize(entry.path())
+                    .await
+                    .expect("Failed to get absolute path");
                 let url = Url::from_file_path(abs_path).expect("Failed to convert path to URL");
                 trace!("init url {}", &url);
-                self.did_open(url, content).await;
+                self.did_open(url, content);
             } else {
                 trace!("Failed to read content {:?}", entry.path());
             }
         }
     }
 
-    pub(crate) async fn complete(
+    pub(crate) fn complete(
         &self,
         url: &Url,
         lang: Arc<str>,
@@ -204,9 +207,9 @@ impl Completer {
         let doc = self.documents.get(url);
         if let Some(doc) = doc {
             let r = doc.deref().clone();
-            if let Some((k, v, tokens, symbols)) = Self::build_tree(url, r).await {
+            if let Some((k, v, tokens, symbols)) = Self::build_tree(url, r) {
                 let pos = param.text_document_position.position;
-                let index = doc.get_index_from_position(pos).await;
+                let index = doc.get_index_from_position(pos);
                 let index_value;
                 if let Some(index_v) = index {
                     index_value = index_v;
@@ -216,7 +219,7 @@ impl Completer {
                 }
 
                 let boundary_indices;
-                if let Some(bd) = doc.get_boundary_indices(index_value).await {
+                if let Some(bd) = doc.get_boundary_indices(index_value) {
                     boundary_indices = bd;
                 } else {
                     trace!("cant get_boundary_indices {:?}", pos);
@@ -226,7 +229,7 @@ impl Completer {
                 let char;
                 {
                     let input_char_index = index_value - 1;
-                    if let Some(cr) = doc.get_char(input_char_index).await {
+                    if let Some(cr) = doc.get_char(input_char_index) {
                         char = cr;
                     } else {
                         return None;
@@ -242,10 +245,9 @@ impl Completer {
                     &tokens,
                     &v,
                     &self.jsonui_define,
-                )
-                    .await;
+                );
 
-                self.add_tree(k.as_ref(), v);
+                self.add_tree(k.as_ref(), Arc::new(v));
                 self.caches.insert(k.clone(), Arc::new(tokens));
                 symbols.into_iter().for_each(|(k, v)| {
                     self.symbol_table.insert(k, v);
@@ -259,25 +261,25 @@ impl Completer {
         None
     }
 
-    pub async fn complete_color(&self, url: &Url) -> Option<Vec<ColorInformation>> {
+    pub fn complete_color(&self, url: &Url) -> Option<Vec<ColorInformation>> {
         let doc = self.documents.get(url);
         if let Some(doc) = doc {
             if !doc.is_dirty() {
                 let tokens = self.caches.get(&doc.get_cache_namespace());
                 if let Some(tokens) = tokens {
-                    return crate::complete_helper::color(doc.borrow(), &tokens).await;
+                    return crate::complete_helper::color(doc.borrow(), &tokens);
                 }
             }
-            let input = doc.get_content().await;
-            let r = parse_full(input.as_ref()).await;
+            let input = doc.get_content();
+            let r = parse_full(input.as_ref());
             if let Some(r) = r {
-                return crate::complete_helper::color(doc.borrow(), &r.1).await;
+                return crate::complete_helper::color(doc.borrow(), &r.1);
             }
         }
         None
     }
 
-    pub async fn goto_definition(
+    pub fn goto_definition(
         &self,
         params: &GotoDefinitionParams,
     ) -> Option<GotoDefinitionResponse> {
@@ -286,7 +288,7 @@ impl Completer {
         let pos = &param.position;
         let doc = self.documents.get(url);
         if let Some(doc) = doc {
-            let index = doc.get_index_from_position(*pos).await;
+            let index = doc.get_index_from_position(*pos);
             let index = index?;
             let namespace = doc.get_cache_namespace();
 
@@ -296,9 +298,9 @@ impl Completer {
                 }
             }
 
-            if let Some((k, v, tokens, symbols)) = Self::build_tree(url, doc.clone()).await {
+            if let Some((k, v, tokens, symbols)) = Self::build_tree(url, doc.clone()) {
                 let tokens = Arc::new(tokens);
-                self.add_tree(k.as_ref(), v);
+                self.add_tree(k.as_ref(), Arc::new(v));
                 self.caches.insert(k.clone(), tokens.clone());
                 symbols.into_iter().for_each(|(k, v)| {
                     self.symbol_table.insert(k, v);
@@ -310,22 +312,21 @@ impl Completer {
         None
     }
 
-    pub(crate) async fn update_document(&self, url: &Url, param: &DidChangeTextDocumentParams) {
+    pub(crate) fn update_document(&self, url: &Url, param: &DidChangeTextDocumentParams) {
         let doc = self.documents.get(url);
         if let Some(doc) = doc {
-            doc.apply_change(param).await;
+            doc.apply_change(param);
         }
     }
 
-    pub(crate) async fn did_open(&self, url: Url, content: Arc<str>) {
+    pub(crate) fn did_open(&self, url: Url, content: Arc<str>) {
         let np = Document::get_namespace(content.clone());
         if let Some(np) = np {
             let doc: Arc<Document> = Arc::new(Document::from(content));
-
             self.documents.insert(url.clone(), doc.clone());
-            if let Some((k, v, tokens, symbols)) = Self::build_tree(&url, doc).await {
+            if let Some((k, v, tokens, symbols)) = Self::build_tree(&url, doc) {
                 self.urls.insert(Arc::from(np.as_str()), url.clone());
-                self.add_tree(k.as_ref(), v);
+                self.add_tree(k.as_ref(), Arc::new(v));
                 self.caches.insert(k.clone(), Arc::new(tokens));
                 symbols.into_iter().for_each(|(k, v)| {
                     self.symbol_table.insert(k, v);
@@ -371,23 +372,18 @@ impl Completer {
     }
 
     pub(crate) fn contain_tree(&self, name: &str) -> bool {
-        self.trees
-            .read()
-            .expect("cant get read lock in contain_tree")
-            .contains_key(name)
+        self.trees.read().contains_key(name)
     }
 
-    pub(crate) fn add_tree(&self, k: &str, v: Tree<AutomatedId, ControlNode>) {
-        let mut t_lock = self.trees.write().expect("cant get write lock in add_tree");
-        t_lock.insert(Arc::from(k), v);
+    pub(crate) fn add_tree(&self, k: &str, v: Arc<Tree<AutomatedId, ControlNode>>) {
+        self.trees.write().insert(Arc::from(k), v);
     }
 
     pub(crate) fn del_tree(&self, k: &str) {
-        let mut t_lock = self.trees.write().expect("cant get write lock in add_tree");
-        t_lock.remove(k);
+        self.trees.write().remove(k);
     }
 
-    async fn build_tree(
+    fn build_tree(
         url: &Url,
         document: Arc<Document>,
     ) -> Option<(
@@ -396,8 +392,8 @@ impl Completer {
         Vec<Token>,
         BfastHashMap<ControlNameSymbol, Location>,
     )> {
-        let input = document.get_content().await;
-        let r = parse_full(input.as_ref()).await;
+        let input = document.get_content();
+        let r = parse_full(input.as_ref());
         match r {
             Some((range, tokens)) => {
                 let np = document.get_cache_namespace();
@@ -415,13 +411,13 @@ impl Completer {
                 let root = ControlNode {
                     define: ControlDefine {
                         name: (Arc::from("root"), None),
-                        type_n: StdMutex::new(None),
-                        variables: StdMutex::new(BfastHashSet::default()),
+                        type_n: Mutex::new(None),
+                        variables: Mutex::new(BfastHashSet::default()),
                     },
                     loc: range,
                 };
-                Self::add_tree_node(&ctx, root, None).await;
-                Self::build_control_tree(&tokens, &ctx).await;
+                Self::add_tree_node(&ctx, root, None);
+                Self::build_control_tree(&tokens, &ctx);
                 Some((np, ctx.tree.into_inner(), tokens, ctx.symbol_table.into_inner()))
             }
             None => {
@@ -431,7 +427,7 @@ impl Completer {
         }
     }
 
-    async fn build_control_tree<'a>(tokens: &'a Vec<Token>, ctx: &'a BuildTreeContext) {
+    fn build_control_tree<'a>(tokens: &'a Vec<Token>, ctx: &'a BuildTreeContext) {
         // recursion layer check
         let layer = ctx.layer.load(std::sync::atomic::Ordering::SeqCst);
         if layer > 100 {
@@ -440,10 +436,7 @@ impl Completer {
 
         let m = to_map_with_span_ref(tokens);
         let v = {
-            ctx.control_name
-                .try_lock()
-                .expect("cant get control_name lock")
-                .take()
+            ctx.control_name.lock().take()
         };
         let np = ctx.document.get_cache_namespace();
         if let Some(v) = v {
@@ -466,63 +459,65 @@ impl Completer {
             }
 
             let type_n = type_n.map(|f| Arc::from(f.as_str()));
+
+            let loc = {
+                *ctx.loc.lock()
+            };
             let node = ControlNode {
                 define: ControlDefine {
                     name: (name, extend),
-                    type_n: StdMutex::new(type_n),
-                    variables: StdMutex::new(variables),
+                    type_n: Mutex::new(type_n),
+                    variables: Mutex::new(variables),
                 },
-                loc: { *ctx.loc.try_lock().expect("cant get loc lock") },
+                loc,
             };
 
-            let option = { ctx.last_node.try_lock().expect("cant get last_node lock").take() };
+            let option = {
+                ctx.last_node.lock().take()
+            };
             let option = option.as_ref();
-            Self::add_tree_node(ctx, node, option).await;
+            Self::add_tree_node(ctx, node, option);
 
             for i in arrays {
                 if let Token::Array(_, vec) = i {
                     for i in vec.as_ref().unwrap() {
                         if let Token::Object(_, value) = i {
                             {
-                                *ctx.control_name.try_lock().expect("cant get control_name lock") = None;
+                                *ctx.control_name.lock() = None;
                             }
-                            Box::pin(Self::build_control_tree(value.as_ref().unwrap(), ctx)).await;
+                            Self::build_control_tree(value.as_ref().unwrap(), ctx);
                         }
                     }
                 }
             }
             {
-                *ctx.control_name.try_lock().expect("cant get control_name lock") = None;
+                *ctx.control_name.lock() = None;
             }
         } else {
             for ((range, k), v) in m {
                 if let Token::Object(r, value) = v {
                     // ControlName Symbol build
                     if layer == 0 {
-                        let pos_l = { ctx.document.get_position_from_index(range.0).await };
-                        let pos_r = { ctx.document.get_position_from_index(range.1).await };
+                        let pos_l = { ctx.document.get_position_from_index(range.0) };
+                        let pos_r = { ctx.document.get_position_from_index(range.1) };
                         if let (Some(pos_l), Some(pos_r)) = (pos_l, pos_r) {
                             let name = split_control_name(k.as_ref(), np.as_ref());
                             let symbol_key = ControlNameSymbol::new((np.clone(), name.0));
                             {
                                 let location = Location::new(ctx.url.clone(), Range::new(pos_l, pos_r));
-                                ctx.symbol_table
-                                    .try_lock()
-                                    .expect("cant get symbol_table lock")
-                                    .insert(symbol_key, location);
+                                ctx.symbol_table.lock().insert(symbol_key, location);
                             }
                         }
                     }
                     {
-                        *ctx.control_name.try_lock().expect("cant get control_name lock") =
-                            Some(Arc::from(k));
+                        *ctx.control_name.lock() = Some(Arc::from(k));
                     }
                     {
-                        *ctx.loc.try_lock().expect("cant get loc lock") = *r;
+                        *ctx.loc.lock() = *r;
                     }
                     ctx.layer.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    Box::pin(Self::build_control_tree(value.as_ref().unwrap(), ctx)).await;
-                    Self::pop_tree(ctx).await;
+                    Self::build_control_tree(value.as_ref().unwrap(), ctx);
+                    Self::pop_tree(ctx);
                 }
             }
         }
@@ -533,8 +528,10 @@ impl Completer {
         if layer > 100 {
             panic!("too deep recursive layer {}, more than 100", layer);
         }
-        let trees = self.trees.read().unwrap();
-        let parent = trees.get(&extend.0);
+        let parent = {
+            let trees = self.trees.read();
+            trees.get(&extend.0).cloned()
+        };
         if let Some(tr) = parent {
             let root = tr.get_root_node().unwrap();
             for i in root.get_children_ids() {
@@ -544,15 +541,17 @@ impl Completer {
                     continue;
                 }
                 {
-                    let type_n = v.define.type_n.lock().expect("type_n lock error");
-                    if ctx.type_n.borrow().is_none() && type_n.is_some() {
-                        ctx.type_n.replace(type_n.clone());
+                    let type_n = v.define.type_n.lock();
+                    let mut ctx_type_n = ctx.type_n.lock();
+                    if ctx_type_n.borrow().is_none() && type_n.is_some() {
+                        *ctx_type_n = type_n.clone();
                     }
                 }
                 {
-                    let variables = v.define.variables.lock().expect("type_n lock error");
+                    let variables = v.define.variables.lock();
+                    let mut ctx_variables = ctx.variables.lock();
                     if !variables.is_empty() {
-                        ctx.variables.borrow_mut().extend(variables.clone());
+                        ctx_variables.extend(variables.clone());
                     }
                 }
                 if let Some(ref extend) = v.define.name.1 {
@@ -564,15 +563,17 @@ impl Completer {
             let r = self.vanilla_controls_table.get(extend);
             if let Some(r) = r {
                 {
-                    let type_n = r.type_n.lock().expect("type_n lock error");
-                    if ctx.type_n.borrow().is_none() && type_n.is_some() {
-                        ctx.type_n.replace(type_n.clone());
+                    let type_n = r.type_n.lock();
+                    let mut ctx_type_n = ctx.type_n.lock();
+                    if ctx_type_n.borrow().is_none() && type_n.is_some() {
+                        *ctx_type_n = type_n.clone();
                     }
                 }
                 {
-                    let variables = r.variables.lock().expect("type_n lock error");
+                    let variables = r.variables.lock();
+                    let mut ctx_variables = ctx.variables.lock();
                     if !variables.is_empty() {
-                        ctx.variables.borrow_mut().extend(variables.clone());
+                        ctx_variables.extend(variables.clone());
                     }
                 }
             }
@@ -585,30 +586,27 @@ impl Completer {
     ) -> Option<(Arc<str>, BfastHashSet<Arc<str>>)> {
         let ctx = RecursiveSearchContext::new();
         self.recursive_search(extend, &ctx);
-        if let Some(type_n) = ctx.type_n.take() {
-            Some((type_n, ctx.variables.take()))
-        } else {
-            None
-        }
+        let type_n = ctx.type_n.into_inner()?;
+        Some((type_n, ctx.variables.into_inner()))
     }
 
-    async fn pop_tree(ctx: &BuildTreeContext) {
-        let last_node = { ctx.last_node.lock().await.take() };
+    fn pop_tree(ctx: &BuildTreeContext) {
+        let last_node = { ctx.last_node.lock().take() };
         if let Some(last_node) = last_node {
-            let r = ctx.tree.lock().await.borrow().get_node_by_id(&last_node);
+            let r = ctx.tree.lock().borrow().get_node_by_id(&last_node);
             if let Some(r) = r {
-                *ctx.last_node.lock().await = r.get_parent_id();
+                *ctx.last_node.lock() = r.get_parent_id();
             }
         }
         ctx.layer.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
     }
 
-    async fn add_tree_node(ctx: &BuildTreeContext, node: ControlNode, id: Option<&AutomatedId>) {
-        let mut tr = ctx.tree.lock().await;
+    fn add_tree_node(ctx: &BuildTreeContext, node: ControlNode, id: Option<&AutomatedId>) {
+        let mut tr = ctx.tree.lock();
         let r = tr.add_node(Node::<AutomatedId, ControlNode>::new_auto(Some(node)), id);
         match r {
             Ok(r) => {
-                *ctx.last_node.lock().await = Some(r);
+                *ctx.last_node.lock() = Some(r);
             }
             Err(e) => {
                 trace!("error in add node for tree,detail {}", e);
@@ -668,14 +666,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_completer_init() {
-        let p = crate::load_completer().await;
+        let p = crate::load_completer();
         let path = PathBuf::from("test");
         assert!(path.exists());
         crate::tests::setup_logger();
         p.init(&path).await;
         assert!(p.contain_tree("achievement"));
         assert!(p.contain_tree("add_external_server"));
-        let trees = p.trees.read().unwrap();
+        let trees = p.trees.read();
         for (_, v) in trees.iter() {
             println!("tree {} \n------------", v);
         }

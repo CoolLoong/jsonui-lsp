@@ -8,41 +8,41 @@ mod lexer;
 mod museair;
 mod tree_ds;
 
-pub(crate) mod tower_lsp {
-    pub(crate) use tower_lsp::jsonrpc::Result;
+pub(crate) mod towerlsp {
     pub(crate) use tower_lsp::lsp_types::*;
     pub(crate) use tower_lsp::{async_trait, Client, LanguageServer, LspService, Server};
 }
 
 use std::path::PathBuf;
+use std::sync::atomic::AtomicU8;
 use std::sync::Arc;
 
 use completer::Completer;
+use dashmap::DashMap;
 use flexi_logger::{LogSpecification, Logger, LoggerHandle};
 use lasso::Rodeo;
 use log::{info, set_max_level, trace};
-use tokio::sync::Mutex;
-use tower_lsp::*;
+use museair::{BfastDashMap, BfastHash};
+use parking_lot::Mutex;
+use towerlsp::*;
 
 use crate::completer::ControlDefine;
 use crate::museair::{BfastHashMap, BfastHashSet};
 
-type StdMutex<T> = std::sync::Mutex<T>;
-
 const VANILLA_PACK_DEFINE: &str = include_str!("resources/vanillapack_define_1.21.40.3.json");
 const JSONUI_DEFINE: &str = include_str!("resources/jsonui_define.json");
-const SEED: u64 = 32;
 
 struct Backend {
     client:               Client,
     log:                  Arc<LoggerHandle>,
     lang:                 Mutex<Arc<str>>,
+    processed_docs: BfastDashMap<Url, i32>,
     pub(crate) completer: Completer,
 }
 
 #[async_trait]
 impl LanguageServer for Backend {
-    async fn initialize(&self, param: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, param: InitializeParams) -> tower_lsp::jsonrpc::Result<InitializeResult> {
         let init_config = &param.initialization_options.unwrap();
         if let Some(v) = init_config
             .get("settings")
@@ -69,7 +69,9 @@ impl LanguageServer for Backend {
         }
         let client_lang = init_config.get("locale").unwrap();
         trace!("client lang is {:?}", client_lang);
-        *self.lang.lock().await = Arc::from(client_lang.as_str().unwrap());
+        {
+            *self.lang.lock() = Arc::from(client_lang.as_str().unwrap());
+        }
 
         if let Some(root_url) = param.root_uri
             && let Ok(workspace) = root_url.to_file_path()
@@ -141,44 +143,56 @@ impl LanguageServer for Backend {
         self.client.log_message(MessageType::INFO, "initialized!").await;
     }
 
-    async fn shutdown(&self) -> Result<()> {
+    async fn shutdown(&self) -> tower_lsp::jsonrpc::Result<()> {
         trace!("jsonui-lsp shutdown");
         Ok(())
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        if params.text_document.language_id != "json" {
+        let params = params.text_document;
+        if params.language_id != "json" {
             return;
         }
-        trace!("open {:?}", params.text_document.uri);
-        let arc_content: Arc<str> = Arc::from(params.text_document.text.as_str());
-        self.completer
-            .did_open(params.text_document.uri, arc_content)
-            .await;
+
+        match self.processed_docs.entry(params.uri.clone()) {
+            dashmap::Entry::Occupied(mut entry) => {
+                let existing_version = entry.get();
+                if *existing_version == params.version {
+                    return;
+                } else {
+                    entry.insert(params.version);
+                }
+            }
+            dashmap::Entry::Vacant(entry) => {
+                entry.insert(params.version);
+            }
+        }
+
+        trace!("did_open {}", &params.uri.path());
+        let arc_content: Arc<str> = Arc::from(params.text.as_str());
+        self.completer.did_open(params.uri, arc_content);
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let url = &params.text_document.uri;
-        self.completer.update_document(url, &params).await;
-    }
-
-    async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        let url = &params.text_document.uri;
-        trace!("close {}", url);
-        self.completer.did_close(url);
+        self.completer.update_document(url, &params);
     }
 
     async fn goto_definition(
         &self,
         params: GotoDefinitionParams,
-    ) -> Result<Option<GotoDefinitionResponse>> {
-        Ok(self.completer.goto_definition(&params).await)
+    ) -> tower_lsp::jsonrpc::Result<Option<GotoDefinitionResponse>> {
+        let r = self.completer.goto_definition(&params);
+        Ok(r)
     }
 
-    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+    async fn completion(
+        &self,
+        params: CompletionParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<CompletionResponse>> {
         let url = &params.text_document_position.text_document.uri;
-        let l = self.lang.lock().await;
-        let r = self.completer.complete(url, l.clone(), &params).await;
+        let l = self.lang.lock();
+        let r = self.completer.complete(url, l.clone(), &params);
         if let Some(r) = r {
             Ok(Some(CompletionResponse::Array(r)))
         } else {
@@ -186,9 +200,12 @@ impl LanguageServer for Backend {
         }
     }
 
-    async fn document_color(&self, params: DocumentColorParams) -> Result<Vec<ColorInformation>> {
+    async fn document_color(
+        &self,
+        params: DocumentColorParams,
+    ) -> tower_lsp::jsonrpc::Result<Vec<ColorInformation>> {
         let url = &params.text_document.uri;
-        let r = self.completer.complete_color(url).await;
+        let r = self.completer.complete_color(url);
         if let Some(r) = r {
             Ok(r)
         } else {
@@ -199,7 +216,7 @@ impl LanguageServer for Backend {
     async fn color_presentation(
         &self,
         params: ColorPresentationParams,
-    ) -> Result<Vec<ColorPresentation>> {
+    ) -> tower_lsp::jsonrpc::Result<Vec<ColorPresentation>> {
         let ColorPresentationParams { color, range, .. } = params;
         let color_presentation = ColorPresentation {
             label:                 format!(
@@ -242,8 +259,8 @@ impl LanguageServer for Backend {
     async fn did_create_files(&self, params: CreateFilesParams) {
         for i in params.files.iter() {
             if let Ok(url) = Url::parse(&i.uri) {
-                if let Ok(content) = std::fs::read_to_string(url.path()) {
-                    self.completer.did_open(url, Arc::from(content.as_str())).await;
+                if let Ok(content) = tokio::fs::read_to_string(url.path()).await {
+                    self.completer.did_open(url, Arc::from(content.as_str()));
                 }
             }
         }
@@ -274,9 +291,9 @@ impl Backend {
     }
 }
 
-pub(crate) async fn load_completer() -> Completer {
+pub(crate) fn load_completer() -> Completer {
     let mut pool = Rodeo::default();
-    let r = lexer::parse_full(VANILLA_PACK_DEFINE).await;
+    let r = lexer::parse_full(VANILLA_PACK_DEFINE);
     let vanilla_controls_table = match r {
         Some((_, r)) => {
             let mut result =
@@ -342,9 +359,7 @@ pub(crate) async fn load_completer() -> Completer {
             })
             .collect();
 
-    let jsonui_define = lexer::parse_full(JSONUI_DEFINE)
-        .await
-        .expect("can parse jsonui_define.json");
+    let jsonui_define = lexer::parse_full(JSONUI_DEFINE).expect("can parse jsonui_define.json");
     let jsonui_define_map: BfastHashMap<String, lexer::Token> = lexer::to_map(jsonui_define.1);
 
     Completer::new(vanilla_controls_table, jsonui_define_map)
@@ -356,11 +371,12 @@ async fn main() {
     let stdout = tokio::io::stdout();
     let log = Logger::with(LogSpecification::info()).start().unwrap();
 
-    let completer = load_completer().await;
+    let completer = load_completer();
     let (service, socket) = LspService::build(|client| Backend {
         client,
         log: Arc::new(log),
         lang: Mutex::new(Arc::from("zh-cn")),
+        processed_docs: DashMap::with_hasher_and_shard_amount(BfastHash::<true>::new(), 2),
         completer,
     })
     .finish();

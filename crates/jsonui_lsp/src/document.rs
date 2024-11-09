@@ -1,10 +1,10 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
+use parking_lot::Mutex;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::tower_lsp::*;
+use crate::towerlsp::*;
 
 #[derive(Debug)]
 pub struct Document {
@@ -34,8 +34,8 @@ impl Document {
         }
     }
 
-    pub async fn get_content(&self) -> Arc<str> {
-        Arc::from(self.content_cache.lock().await.as_str())
+    pub fn get_content(&self) -> Arc<str> {
+        Arc::from(self.content_cache.lock().as_str())
     }
 
     pub fn get_cache_namespace(&self) -> Arc<str> {
@@ -51,73 +51,69 @@ impl Document {
     }
 
     /// position line index start from 0
-    pub async fn get_index_from_position(&self, pos: Position) -> Option<usize> {
-        let line = pos.line as usize; // Index starts from 0
-        let line_cache = self.line_info_cache.lock().await;
-
-        if line >= line_cache.len() {
-            return None;
-        }
-
-        let index = pos.character as usize;
-        let result = if line == 0 {
-            index
+    pub fn get_index_from_position(&self, pos: Position) -> Option<usize> {
+        if let Some(line_cache) = self.line_info_cache.try_lock() {
+            let line = pos.line as usize; // Index starts from 0
+            if line >= line_cache.len() {
+                return None;
+            }
+            let index = pos.character as usize;
+            let result = if line == 0 {
+                index
+            } else {
+                let mut result = line_cache[0..line] // get 0 ~ line-1
+                    .iter()
+                    .map(|info| info.char_count)
+                    .sum::<usize>();
+                result += index;
+                result
+            };
+            Some(result)
         } else {
-            let mut result = line_cache[0..line] // get 0 ~ line-1
-                .iter()
-                .map(|info| info.char_count)
-                .sum::<usize>();
-            result += index;
-            result
-        };
-        Some(result)
+            None
+        }
     }
 
     /// Given a character index, return the corresponding Position in the document.
     /// Index starts from 0.
-    pub async fn get_position_from_index(&self, index: usize) -> Option<Position> {
-        let line_cache = self.line_info_cache.lock().await;
-        // Calculate the total number of characters in the document
-        let total_chars = line_cache.iter().map(|info| info.char_count).sum::<usize>();
-
-        if index >= total_chars {
-            return None; // Index is out of bounds
-        }
-
-        let mut current_index = 0;
-
-        for (line_num, info) in line_cache.iter().enumerate() {
-            // Check if the index is within this line
-            if index < current_index + info.char_count {
-                let character = index - current_index;
-                return Some(Position {
-                    line:      line_num as u32,
-                    character: character as u32,
-                });
+    pub fn get_position_from_index(&self, index: usize) -> Option<Position> {
+        if let Some(line_cache) = self.line_info_cache.try_lock() {
+            // Calculate the total number of characters in the document
+            let total_chars = line_cache.iter().map(|info| info.char_count).sum::<usize>();
+            if index >= total_chars {
+                return None; // Index is out of bounds
             }
+            let mut current_index = 0;
 
-            // Update the current index to the start of the next line
-            current_index += info.char_count;
+            for (line_num, info) in line_cache.iter().enumerate() {
+                // Check if the index is within this line
+                if index < current_index + info.char_count {
+                    let character = index - current_index;
+                    return Some(Position {
+                        line: line_num as u32,
+                        character: character as u32,
+                    });
+                }
+                // Update the current index to the start of the next line
+                current_index += info.char_count;
+            }
         }
-
         None // Should not reach here if total_chars is correctly calculated
     }
 
-    pub async fn apply_change(&self, request: &DidChangeTextDocumentParams) {
+    pub fn apply_change(&self, request: &DidChangeTextDocumentParams) {
         for e in request.content_changes.iter() {
             if let Some(v) = e.range {
                 let s = v.start;
                 let end = v.end;
-                let start_index = self.get_index_from_position(s).await;
-                let end_index = self.get_index_from_position(end).await;
+                let start_index = self.get_index_from_position(s);
+                let end_index = self.get_index_from_position(end);
                 if let Some(si) = start_index
                     && let Some(ei) = end_index
                 {
-                    self.replace_grapheme_range(si, ei, Arc::from(e.text.as_str()))
-                        .await;
-
-                    let mut line_cache = self.line_info_cache.lock().await;
-                    let content = self.content_cache.lock().await;
+                    self.replace_grapheme_range(si, ei, Arc::from(e.text.as_str()));
+                    let mut line_cache = self.line_info_cache.lock();
+                    let content = self.content_cache.lock();
                     *line_cache = Self::build_line_info_cache(&content);
                 }
             }
@@ -125,95 +121,103 @@ impl Document {
         self.dirty.store(true, std::sync::atomic::Ordering::Release);
     }
 
-    pub async fn get_boundary_indices(&self, index: usize) -> Option<(usize, usize)> {
-        let content = self.chars.lock().await;
-        let (forward, backward) = content.split_at(index);
-        #[cfg(feature = "debug-parse")]
-        trace!("before {:?} | after {:?}", forward, backward);
-        if forward.is_empty() || backward.is_empty() {
-            return None;
-        }
+    pub fn get_boundary_indices(&self, index: usize) -> Option<(usize, usize)> {
+        if let Some(content) = self.chars.try_lock() {
+            let (forward, backward) = content.split_at(index);
 
-        let mut boundary_stacks = vec![vec![], vec![], vec![], vec![]];
-        let (mut start_index, mut end_index) = (None, None);
-        let mut forward_iter = forward.iter().rev().peekable().enumerate();
+            #[cfg(feature = "debug-parse")]
+            trace!("before {:?} | after {:?}", forward, backward);
+            if forward.is_empty() || backward.is_empty() {
+                return None;
+            }
 
-        let f_len = forward.len();
-        while let Some((_, ch)) = forward_iter.next() {
-            let char = ch.as_ref();
-            match char {
-                "{" | "}" | "[" | "]" => Self::handle_boundary_char(char, &mut boundary_stacks),
-                ":" => {
-                    if !(boundary_stacks[0].len() == 1 || boundary_stacks[2].len() == 1) {
-                        continue;
+            let mut boundary_stacks = vec![vec![], vec![], vec![], vec![]];
+            let (mut start_index, mut end_index) = (None, None);
+            let mut forward_iter = forward.iter().rev().peekable().enumerate();
+
+            let f_len = forward.len();
+            while let Some((_, ch)) = forward_iter.next() {
+                let char = ch.as_ref();
+                match char {
+                    "{" | "}" | "[" | "]" => Self::handle_boundary_char(char, &mut boundary_stacks),
+                    ":" => {
+                        if !(boundary_stacks[0].len() == 1 || boundary_stacks[2].len() == 1) {
+                            continue;
+                        }
+                        let opt = forward_iter
+                            .by_ref()
+                            .skip_while(|(_, c)| c.as_ref() != "\"")
+                            .skip(1)
+                            .skip_while(|(_, c)| c.as_ref() != "\"")
+                            .nth(1);
+                        if let Some((index, _)) = opt {
+                            start_index = Some(f_len - index);
+                            break;
+                        }
                     }
-                    let opt = forward_iter
-                        .by_ref()
-                        .skip_while(|(_, c)| c.as_ref() != "\"")
-                        .skip(1)
-                        .skip_while(|(_, c)| c.as_ref() != "\"")
-                        .nth(1);
-                    if let Some((index, _)) = opt {
-                        start_index = Some(f_len - index);
-                        break;
-                    }
+                    _ => {}
                 }
-                _ => {}
             }
-        }
-        let start_index_v = start_index?;
+            let start_index_v = start_index?;
 
-        let backend_iter = backward.iter().peekable().enumerate();
-        for (index, ch) in backend_iter {
-            let char = ch.as_ref();
-            match char {
-                "{" | "}" | "[" | "]" => Self::handle_boundary_char(char, &mut boundary_stacks),
-                _ => {}
+            let backend_iter = backward.iter().peekable().enumerate();
+            for (index, ch) in backend_iter {
+                let char = ch.as_ref();
+                match char {
+                    "{" | "}" | "[" | "]" => Self::handle_boundary_char(char, &mut boundary_stacks),
+                    _ => {}
+                }
+                if boundary_stacks.iter().all(|stack| stack.is_empty()) {
+                    end_index = Some(index + f_len);
+                    break;
+                }
             }
-            if boundary_stacks.iter().all(|stack| stack.is_empty()) {
-                end_index = Some(index + f_len);
-                break;
-            }
-        }
-        let end_index_v = end_index?;
-        Some((start_index_v, end_index_v))
-    }
-
-    pub async fn get_char(&self, index: usize) -> Option<Arc<str>> {
-        let chars = self.chars.lock().await;
-        if index >= chars.len() {
+            let end_index_v = end_index?;
+            Some((start_index_v, end_index_v))
+        } else {
             None
-        } else {
-            Some(chars[index].clone())
         }
     }
 
-    pub async fn replace_grapheme_range(&self, start_idx: usize, end_idx: usize, replacement: Arc<str>) {
-        let mut chars = self.chars.lock().await;
-        if start_idx > end_idx || start_idx > chars.len() || end_idx > chars.len() {
-            panic!()
-        }
-
-        let (before, after) = if end_idx == start_idx {
-            chars.split_at(start_idx)
+    pub fn get_char(&self, index: usize) -> Option<Arc<str>> {
+        if let Some(chars) = self.chars.try_lock() {
+            if index >= chars.len() {
+                None
+            } else {
+                Some(chars[index].clone())
+            }
         } else {
-            let (s, _) = chars.split_at(start_idx);
-            let (_, e) = chars.split_at(end_idx);
-            (s, e)
-        };
-        let mut result: Vec<Arc<str>> = Vec::new();
-        result.extend_from_slice(before);
-        result.append(
-            &mut replacement
-                .graphemes(true)
-                .map(Arc::from)
-                .collect::<Vec<Arc<str>>>(),
-        );
-        result.extend_from_slice(after);
+            None
+        }
+    }
 
-        let mut content = self.content_cache.lock().await;
-        *content = result.join("");
-        *chars = result;
+    pub fn replace_grapheme_range(&self, start_idx: usize, end_idx: usize, replacement: Arc<str>) {
+        if let Some(mut chars) = self.chars.try_lock() {
+            if start_idx > end_idx || start_idx > chars.len() || end_idx > chars.len() {
+                panic!()
+            }
+
+            let (before, after) = if end_idx == start_idx {
+                chars.split_at(start_idx)
+            } else {
+                let (s, _) = chars.split_at(start_idx);
+                let (_, e) = chars.split_at(end_idx);
+                (s, e)
+            };
+            let mut result: Vec<Arc<str>> = Vec::new();
+            result.extend_from_slice(before);
+            result.append(
+                &mut replacement
+                    .graphemes(true)
+                    .map(Arc::from)
+                    .collect::<Vec<Arc<str>>>(),
+            );
+            result.extend_from_slice(after);
+
+            let mut content = self.content_cache.lock();
+            *content = result.join("");
+            *chars = result;
+        }
     }
 
     fn build_line_info_cache(content: &str) -> Vec<LineInfo> {
@@ -286,8 +290,8 @@ mod tests {
 
     const EXAMPLE1: &str = include_str!("../test/achievement.json");
 
-    #[tokio::test]
-    async fn test_apply_change() {
+    #[test]
+    fn test_apply_change() {
         let document = Document::from(Arc::from(EXAMPLE1));
         let request = DidChangeTextDocumentParams {
             text_document:   VersionedTextDocumentIdentifier {
@@ -339,18 +343,17 @@ mod tests {
                 },
             ],
         };
-        document.apply_change(&request).await;
+        document.apply_change(&request);
         #[rustfmt::skip]
         assert!(document
             .content_cache
             .lock()
-            .await
             .contains(r#""clip_pixelperfect": false,
     """#));
     }
 
-    #[tokio::test]
-    async fn test_apply_delete_change() {
+    #[test]
+    fn test_apply_delete_change() {
         let document = Document::from(Arc::from(EXAMPLE1));
         let request = DidChangeTextDocumentParams {
             text_document:   VersionedTextDocumentIdentifier {
@@ -372,38 +375,37 @@ mod tests {
                 text:         "".to_string(),
             }],
         };
-        document.apply_change(&request).await;
-        let docs = document.content_cache.lock().await;
+        document.apply_change(&request);
+        let docs = document.content_cache.lock();
         #[rustfmt::skip]
         assert!(docs.contains("\"clip_direction\": \"\""));
     }
 
-    #[tokio::test]
-    async fn test_replace_grapheme_range() {
+    #[test]
+    fn test_replace_grapheme_range() {
         let document = Document::from(Arc::from("hello 世界"));
-        document.replace_grapheme_range(5, 5, Arc::from("MMM")).await;
-        assert_eq!(*document.content_cache.lock().await, "helloMMM 世界");
-        document.replace_grapheme_range(5, 8, Arc::from("XXX")).await;
-        assert_eq!(*document.content_cache.lock().await, "helloXXX 世界");
-        document.replace_grapheme_range(8, 8, Arc::from("D")).await;
-        assert_eq!(*document.content_cache.lock().await, "helloXXXD 世界");
+        document.replace_grapheme_range(5, 5, Arc::from("MMM"));
+        assert_eq!(*document.content_cache.lock(), "helloMMM 世界");
+        document.replace_grapheme_range(5, 8, Arc::from("XXX"));
+        assert_eq!(*document.content_cache.lock(), "helloXXX 世界");
+        document.replace_grapheme_range(8, 8, Arc::from("D"));
+        assert_eq!(*document.content_cache.lock(), "helloXXXD 世界");
     }
 
-    #[tokio::test]
-    async fn test_get_boundary_indices() {
+    #[test]
+    fn test_get_boundary_indices() {
         let document = Document::from(Arc::from(EXAMPLE1));
         let v: usize = document
             .get_index_from_position(Position {
                 line:      16,
                 character: 6,
             })
-            .await
             .unwrap();
 
-        let result = document.get_boundary_indices(v).await;
+        let result = document.get_boundary_indices(v);
         let (l, r) = result.unwrap();
-        let lc = document.get_char(l).await.unwrap();
-        let rc = document.get_char(r).await.unwrap();
+        let lc = document.get_char(l).unwrap();
+        let rc = document.get_char(r).unwrap();
         assert_eq!((lc.as_ref(), rc.as_ref()), ("\"", "}"));
 
         let v = document
@@ -411,9 +413,8 @@ mod tests {
                 line:      6,
                 character: 3,
             })
-            .await
             .unwrap();
-        let result = document.get_boundary_indices(v).await;
+        let result = document.get_boundary_indices(v);
         assert_eq!(result, None);
     }
 

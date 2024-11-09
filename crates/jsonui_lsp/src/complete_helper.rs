@@ -6,13 +6,13 @@ use crate::completer::{split_control_name, AutoTree, Completer, ControlNameSymbo
 use crate::document::Document;
 use crate::lexer::prelude::*;
 use crate::museair::{BfastHashMap, BfastHashSet};
-use crate::tower_lsp::*;
+use crate::towerlsp::*;
 use crate::tree_ds::prelude::{AutomatedId, Node};
 
 const BIND: &str = "bindings";
 const CONTROLS: &str = "controls";
 
-pub(crate) async fn color(doc: &Document, tokens: &[Token]) -> Option<Vec<ColorInformation>> {
+pub(crate) fn color(doc: &Document, tokens: &[Token]) -> Option<Vec<ColorInformation>> {
     let mut color_infos = Vec::new();
     let tokens = flatten_tokens(tokens);
     let mut iter = tokens.iter();
@@ -23,7 +23,7 @@ pub(crate) async fn color(doc: &Document, tokens: &[Token]) -> Option<Vec<ColorI
     {
         let pos = color_v.pos();
         if let (Some(left_v), Some(right_v)) =
-            (doc.get_position_from_index(pos.0).await, doc.get_position_from_index(pos.1).await)
+            (doc.get_position_from_index(pos.0), doc.get_position_from_index(pos.1))
         {
             if let Some(color) = from_color_value_to_color_arr(color_v) {
                 color_infos.push(ColorInformation {
@@ -43,7 +43,7 @@ pub(crate) async fn color(doc: &Document, tokens: &[Token]) -> Option<Vec<ColorI
     }
 }
 
-pub(crate) async fn normal(
+pub(crate) fn normal(
     completer: &Completer,
     index: usize,
     boundary_indices: (usize, usize),
@@ -72,6 +72,7 @@ pub(crate) async fn normal(
         let r = boundary.first();
 
         if let Some(Token::Str(_, str)) = r {
+            #[cfg(feature = "debug-parse")]
             trace!(
                 "input |n1 {:?}| |n2 {:?}| |current {:?}| |n3 {:?}| |n4 {:?}| char '{}'",
                 n1,
@@ -100,7 +101,7 @@ pub(crate) async fn normal(
                         && v.is_empty()
                     {
                         trace!("create_value_completion");
-                        let extra_values = create_variables_completion(completer, n).await;
+                        let extra_values = create_variables_completion(completer, n);
                         return create_value_completion(
                             pos,
                             n3,
@@ -114,7 +115,7 @@ pub(crate) async fn normal(
                         && let Some(Token::Colon(_)) = current
                     {
                         trace!("create_value_completion");
-                        let extra_values = create_variables_completion(completer, n).await;
+                        let extra_values = create_variables_completion(completer, n);
                         return create_value_completion(
                             pos,
                             n3,
@@ -128,18 +129,18 @@ pub(crate) async fn normal(
                         && let Some(Token::Str(_, str)) = current
                         && str.is_empty()
                     {
-                        trace!("create_type_completion");
                         let node = n.get_value().unwrap();
                         let r = if let Some(r) = node.get_type() {
                             r
-                        } else if let Some(extend) = node.define.name.1
-                            && let Some((r, _)) = completer.find_extend_value(&extend)
+                        } else if let Some(extend) = &node.define.name.1
+                            && let Some((r, _)) = completer.find_extend_value(extend)
                         {
                             r.to_string()
                         } else {
-                            trace!("cant find type_completion!");
+                            trace!("cant find type_completion {}", node);
                             return None;
                         };
+                        trace!("create_type_completion {}", r);
                         let inputs = create_type_input(&r, define_map);
                         return create_type_completion(inputs, pos, lang, define_map);
                     }
@@ -230,7 +231,7 @@ fn create_binding_type_input<'a>(
     r
 }
 
-async fn create_variables_completion(
+fn create_variables_completion(
     completer: &Completer,
     n: Node<AutomatedId, ControlNode>,
 ) -> BfastHashSet<Arc<str>> {
@@ -239,10 +240,11 @@ async fn create_variables_completion(
     {
         let extend_v = completer.find_extend_value(extend);
         if let Some((_, vars)) = extend_v {
-            let r = v.define.variables.lock().expect("cant get variables lock");
-            let mut r = r.clone();
-            r.extend(vars.iter().cloned());
-            return r;
+            if let Some(r) = v.define.variables.try_lock() {
+                let mut r = r.clone();
+                r.extend(vars.iter().cloned());
+                return r;
+            }
         }
     }
     BfastHashSet::default()
@@ -306,34 +308,26 @@ fn find_closest_node(
     index: usize,
 ) -> Option<AutomatedId> {
     let mut closest_node = None;
-    let mut min_distance = usize::MAX;
 
     fn search(
         tree: &AutoTree<ControlNode>,
         n: &Node<AutomatedId, ControlNode>,
         index: usize,
         closest_node: &mut Option<AutomatedId>,
-        min_distance: &mut usize,
     ) {
         if let Some(ref v) = n.get_value() {
             let (l, r) = v.loc;
-            let distance = index.abs_diff(l) + r.abs_diff(index);
-            if distance < *min_distance {
-                *min_distance = distance;
+            if l <= index && index <= r {
                 *closest_node = Some(n.get_node_id());
-            }
-
-            if index >= l {
                 for i in n.get_children_ids() {
                     if let Some(child_node) = tree.get_node_by_id(&i) {
-                        search(tree, &child_node, index, closest_node, min_distance);
+                        search(tree, &child_node, index, closest_node);
                     }
                 }
             }
         }
     }
-
-    search(tree, n, index, &mut closest_node, &mut min_distance);
+    search(tree, n, index, &mut closest_node);
     closest_node
 }
 
@@ -707,21 +701,19 @@ mod tests {
     use crate::document::Document;
     use crate::lexer::{Lexer, Token};
 
-    #[tokio::test]
-    async fn test() {
+    #[test]
+    fn test() {
         let r = Lexer::new();
         let input = include_str!("../test/achievement.json");
         let doc = Document::from(Arc::from(input));
-        let r = r.parse(None, &doc).await;
+        let r = r.parse(None, &doc);
         let r = r.unwrap();
         let r = super::flatten_tokens(&r);
-        let index = doc
-            .get_index_from_position(Position {
-                line:      32,
-                character: 23,
-            })
-            .await;
-        let boundary = doc.get_boundary_indices(index.unwrap()).await;
+        let index = doc.get_index_from_position(Position {
+            line: 32,
+            character: 23,
+        });
+        let boundary = doc.get_boundary_indices(index.unwrap());
         let bd = boundary.unwrap();
         let r = super::boundary_tokens(&r, (bd.0, bd.1));
         let expect = Token::Str((1015, 1025), "controls".to_string());
@@ -730,17 +722,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_find_closest_node() {
-        let p = crate::load_completer().await;
+        let p = crate::load_completer();
         let path = PathBuf::from("test");
         assert!(path.exists());
 
         crate::tests::setup_logger();
         p.init(&path).await;
 
-        let trees = p.trees.read().unwrap();
+        let trees = p.trees.read();
         let r = trees.get("add_external_server");
         let r = r.unwrap();
-        let cr = super::find_closest_node(r, &r.get_root_node().unwrap(), 999);
+        let cr = super::find_closest_node(r, &r.get_root_node().unwrap(), 1006);
         let cr = cr.expect("cant find closest node");
         let r = r.get_node_by_id(&cr);
         if let Some(v) = r {
