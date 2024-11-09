@@ -142,6 +142,7 @@ impl LanguageServer for Backend {
     }
 
     async fn shutdown(&self) -> Result<()> {
+        trace!("jsonui-lsp shutdown");
         Ok(())
     }
 
@@ -331,23 +332,20 @@ pub(crate) async fn load_completer() -> Completer {
 
     let resolver: lasso::RodeoResolver = pool.into_resolver();
 
-    let vanilla_controls_table: BfastHashMap<
-        (Arc<str>, Arc<str>),
-        ControlDefine
-    > = vanilla_controls_table
-        .into_iter()
-        .map(|(k, v)| {
-            let (v1, v2) = k;
-            let v = v.to(&resolver);
-            ((Arc::from(resolver.resolve(&v1)), Arc::from(resolver.resolve(&v2))), v)
-        })
-        .collect();
+    let vanilla_controls_table: BfastHashMap<(Arc<str>, Arc<str>), ControlDefine> =
+        vanilla_controls_table
+            .into_iter()
+            .map(|(k, v)| {
+                let (v1, v2) = k;
+                let v = v.to(&resolver);
+                ((Arc::from(resolver.resolve(&v1)), Arc::from(resolver.resolve(&v2))), v)
+            })
+            .collect();
 
     let jsonui_define = lexer::parse_full(JSONUI_DEFINE)
         .await
         .expect("can parse jsonui_define.json");
-    let jsonui_define_map: BfastHashMap<String, lexer::Token> =
-        lexer::to_map(jsonui_define.1);
+    let jsonui_define_map: BfastHashMap<String, lexer::Token> = lexer::to_map(jsonui_define.1);
 
     Completer::new(vanilla_controls_table, jsonui_define_map)
 }

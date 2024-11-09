@@ -433,7 +433,7 @@ impl Completer {
 
     async fn build_control_tree<'a>(tokens: &'a Vec<Token>, ctx: &'a BuildTreeContext) {
         // recursion layer check
-        let layer = ctx.layer.load(std::sync::atomic::Ordering::Acquire);
+        let layer = ctx.layer.load(std::sync::atomic::Ordering::SeqCst);
         if layer > 100 {
             panic!("too deep layer {} for build_control_tree, more than 100", layer);
         }
@@ -486,7 +486,6 @@ impl Completer {
                             {
                                 *ctx.control_name.try_lock().expect("cant get control_name lock") = None;
                             }
-                            ctx.layer.fetch_add(1, std::sync::atomic::Ordering::Acquire);
                             Box::pin(Self::build_control_tree(value.as_ref().unwrap(), ctx)).await;
                         }
                     }
@@ -521,7 +520,7 @@ impl Completer {
                     {
                         *ctx.loc.try_lock().expect("cant get loc lock") = *r;
                     }
-                    ctx.layer.fetch_add(1, std::sync::atomic::Ordering::Acquire);
+                    ctx.layer.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     Box::pin(Self::build_control_tree(value.as_ref().unwrap(), ctx)).await;
                     Self::pop_tree(ctx).await;
                 }
@@ -601,7 +600,7 @@ impl Completer {
                 *ctx.last_node.lock().await = r.get_parent_id();
             }
         }
-        ctx.layer.fetch_sub(1, std::sync::atomic::Ordering::Acquire);
+        ctx.layer.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
     }
 
     async fn add_tree_node(ctx: &BuildTreeContext, node: ControlNode, id: Option<&AutomatedId>) {
