@@ -84,6 +84,7 @@ pub(crate) async fn normal(
             match str.as_str() {
                 CONTROLS => {}
                 BIND if char.as_ref() == "\""
+                    && !matches!(n2, Some(Token::Colon(_)))
                     && current.is_some()
                     && matches!(current.unwrap(), Token::Str(_, str) if str.is_empty()) =>
                 {
@@ -200,7 +201,6 @@ fn create_binding_type_input<'a>(
                 in_binding = true;
             }
             if pos.0 <= c_pos.0 && c_pos.1 <= pos.1 {
-                trace!("find binding {:?}", binding);
                 if let Some(Token::Str(_, type_v)) =
                     binding.iter().enumerate().find_map(|(index, token)| {
                         if let Token::Str(_, s) = token {
