@@ -2,6 +2,12 @@
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.0.9~0.1.0] - 2024-11-10
+
+### Added
+
+- Implement goto-definition for control name
+
 ## [0.0.8] - 2024-11-08
 
 ### Added

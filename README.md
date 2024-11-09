@@ -11,13 +11,15 @@ This VSCode extension enhances the creation of Minecraft Bedrock JSON-UI by prov
 <img src=".github/img/show1.gif" width="60%"/>
 
 ### Features
-- **Intelligent Control Type and Value Suggestions**: Provides smart auto-completion for various JSON-UI control types and their associated values.
-- **Variable Auto-Completion**: Supports intelligent context variable completion.
-- **Binding Completion**: Offers context-aware suggestions for property bindings.
-- **Color Palette Integration**: Enables quick selection of color variables with an integrated color palette.
-- **Fast and Lightweight Completion Feedback**: Delivers responsive and efficient feedback with minimal memory usage.
-- **Multi-Platform Support**: Fully compatible with Windows, macOS, and Linux.
-- **Multi-Language Completion Labels**: Offers completion labels in both Chinese and English for an enhanced experience.
+
+- **Intelligent Control Type and Value Suggestions**
+- **Binding Type and Value Completion**
+- **Context Variables Auto-Completion**
+- **Goto-Definition for Control Names**
+- **Color Palette Integration**
+- **Fast and Lightweight Completion Feedback**
+- **Multi-Platform Support**
+- **Multi-Language Completion Labels**
 
 ### Contributing
 Contributions are welcome!
