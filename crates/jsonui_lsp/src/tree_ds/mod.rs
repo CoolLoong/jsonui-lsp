@@ -147,13 +147,10 @@
 //!   the `no_std` feature will result in nothing being serialized or deserialized.
 
 mod lib {
-    pub use std::collections::HashSet;
-
     pub use std::string::{String, ToString};
     pub use std::sync::Arc;
-    pub use std::vec::Vec;
     pub use std::vec;
-
+    pub use std::vec::Vec;
 
     pub use self::core::clone::Clone;
     pub use self::core::cmp::{Eq, PartialEq};
@@ -164,6 +161,8 @@ mod lib {
     pub use self::core::option::Option;
     pub use self::core::result::Result;
     pub use self::core::slice::Iter;
+
+    pub use crate::museair::BfastHashSet;
 
     mod core {
         pub use std::*;

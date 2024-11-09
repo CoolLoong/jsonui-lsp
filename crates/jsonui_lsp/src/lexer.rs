@@ -4,6 +4,7 @@ use std::sync::Arc;
 use log::trace;
 
 use crate::document::Document;
+use crate::museair::BfastHashMap;
 
 #[derive(Debug, Clone)]
 
@@ -489,12 +490,11 @@ pub(crate) async fn parse(range: Option<(usize, usize)>, input: &str) -> Option<
     Lexer::new().parse(range, &doc).await
 }
 
-pub(crate) fn to_map(tokens: Vec<Token>) -> std::collections::HashMap<String, Token> {
+pub(crate) fn to_map(tokens: Vec<Token>) -> BfastHashMap<String, Token> {
     let mut key = String::new();
 
     let mut collect = false;
-
-    let mut r = std::collections::HashMap::new();
+    let mut r = BfastHashMap::default();
 
     for i in tokens {
         match i {
@@ -520,12 +520,12 @@ pub(crate) fn to_map(tokens: Vec<Token>) -> std::collections::HashMap<String, To
     r
 }
 
-pub(crate) fn to_map_ref(tokens: &Vec<Token>) -> std::collections::HashMap<String, &Token> {
+pub(crate) fn to_map_ref(tokens: &Vec<Token>) -> BfastHashMap<String, &Token> {
     let mut key = String::new();
 
     let mut collect = false;
 
-    let mut r = std::collections::HashMap::new();
+    let mut r = BfastHashMap::default();
 
     for i in tokens {
         match i {

@@ -789,7 +789,7 @@ where
                 }
             }
         }
-        let mut seen = HashSet::new();
+        let mut seen = BfastHashSet::default();
         nodes.retain(|x| seen.insert(x.clone()));
         Ok(nodes)
     }
@@ -918,8 +918,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::hash::DefaultHasher;
     use super::*;
+    use std::hash::DefaultHasher;
 
     #[test]
     fn test_tree_new() {

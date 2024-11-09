@@ -5,15 +5,16 @@ mod completer;
 mod document;
 mod generator;
 mod lexer;
+mod museair;
 mod tree_ds;
 
 pub(crate) mod tower_lsp {
-    pub(crate) use tower_lsp::{
-        async_trait, jsonrpc::Result, lsp_types::*, Client, LanguageServer, LspService, Server,
-    };
+    pub(crate) use tower_lsp::jsonrpc::Result;
+    pub(crate) use tower_lsp::lsp_types::*;
+    pub(crate) use tower_lsp::{async_trait, Client, LanguageServer, LspService, Server};
 }
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -24,16 +25,14 @@ use log::{info, set_max_level, trace};
 use tokio::sync::Mutex;
 use tower_lsp::*;
 
+use crate::completer::ControlDefine;
+use crate::museair::{BfastHashMap, BfastHashSet};
+
 type StdMutex<T> = std::sync::Mutex<T>;
 
 const VANILLA_PACK_DEFINE: &str = include_str!("resources/vanillapack_define_1.21.40.3.json");
 const JSONUI_DEFINE: &str = include_str!("resources/jsonui_define.json");
 const SEED: u64 = 32;
-
-#[inline]
-fn hash_uri(url: &Url) -> u64 {
-    museair::bfast::hash(url.path().as_bytes(), SEED)
-}
 
 struct Backend {
     client:               Client,
@@ -108,8 +107,8 @@ impl LanguageServer for Backend {
                         label_details_support: Some(true),
                     }),
                 }),
-                definition_provider: None,
-                references_provider: None,
+                definition_provider: Some(OneOf::Left(true)),
+                references_provider: Some(OneOf::Left(true)),
                 workspace: Some(WorkspaceServerCapabilities {
                     workspace_folders: Some(WorkspaceFoldersServerCapabilities {
                         supported:            Some(true),
@@ -153,29 +152,26 @@ impl LanguageServer for Backend {
         }
         trace!("open {:?}", params.text_document.uri);
         let arc_content: Arc<str> = Arc::from(params.text_document.text.as_str());
-        let hash_value = hash_uri(&params.text_document.uri);
-        self.completer.did_open(hash_value, arc_content).await;
+        self.completer
+            .did_open(params.text_document.uri, arc_content)
+            .await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let url = &params.text_document.uri;
-        let key = hash_uri(url);
-        self.completer.update_document(key, &params).await;
+        self.completer.update_document(url, &params).await;
     }
 
-    /// do clean completer for close file
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let url = &params.text_document.uri;
         trace!("close {}", url);
-        let hash_value = hash_uri(url);
-        self.completer.did_close(hash_value);
+        self.completer.did_close(url);
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let url = &params.text_document_position.text_document.uri;
-        let id = hash_uri(url);
         let l = self.lang.lock().await;
-        let r = self.completer.complete(id, l.clone(), &params).await;
+        let r = self.completer.complete(url, l.clone(), &params).await;
         if let Some(r) = r {
             Ok(Some(CompletionResponse::Array(r)))
         } else {
@@ -185,8 +181,7 @@ impl LanguageServer for Backend {
 
     async fn document_color(&self, params: DocumentColorParams) -> Result<Vec<ColorInformation>> {
         let url = &params.text_document.uri;
-        let id = hash_uri(url);
-        let r = self.completer.complete_color(id).await;
+        let r = self.completer.complete_color(url).await;
         if let Some(r) = r {
             Ok(r)
         } else {
@@ -240,11 +235,8 @@ impl LanguageServer for Backend {
     async fn did_create_files(&self, params: CreateFilesParams) {
         for i in params.files.iter() {
             if let Ok(url) = Url::parse(&i.uri) {
-                let hash_value = hash_uri(&url);
                 if let Ok(content) = std::fs::read_to_string(url.path()) {
-                    self.completer
-                        .did_open(hash_value, Arc::from(content.as_str()))
-                        .await;
+                    self.completer.did_open(url, Arc::from(content.as_str())).await;
                 }
             }
         }
@@ -255,9 +247,7 @@ impl LanguageServer for Backend {
             if let Ok(o_url) = Url::parse(&i.old_uri)
                 && let Ok(n_url) = Url::parse(&i.new_uri)
             {
-                let ho = hash_uri(&o_url);
-                let hn = hash_uri(&n_url);
-                self.completer.did_rename(ho, hn);
+                self.completer.did_rename(&o_url, n_url.clone());
             }
         }
     }
@@ -265,8 +255,7 @@ impl LanguageServer for Backend {
     async fn did_delete_files(&self, params: DeleteFilesParams) {
         for i in params.files.iter() {
             if let Ok(url) = Url::parse(&i.uri) {
-                let x = hash_uri(&url);
-                self.completer.did_close(x);
+                self.completer.did_close(&url);
             }
         }
     }
@@ -284,7 +273,7 @@ pub(crate) async fn load_completer() -> Completer {
     let vanilla_controls_table = match r {
         Some((_, r)) => {
             let mut result =
-                HashMap::<(lasso::Spur, lasso::Spur), completer::PooledControlDefine>::new();
+                BfastHashMap::<(lasso::Spur, lasso::Spur), completer::PooledControlDefine>::default();
             let m = lexer::to_map(r);
             for (k1, v) in m {
                 if let lexer::Token::Object(_, v) = v {
@@ -304,7 +293,7 @@ pub(crate) async fn load_completer() -> Completer {
                             let variables = if let Some(v) = m.get("variables")
                                 && let lexer::Token::Array(_, v) = v
                             {
-                                let mut r = HashSet::new();
+                                let mut r = BfastHashSet::default();
                                 for i in v.as_ref().unwrap() {
                                     if let lexer::Token::Str(_, v) = i {
                                         r.insert(pool.get_or_intern(v.as_str()));
@@ -312,7 +301,7 @@ pub(crate) async fn load_completer() -> Completer {
                                 }
                                 r
                             } else {
-                                HashSet::new()
+                                BfastHashSet::default()
                             };
                             result.insert(
                                 tuple,
@@ -335,7 +324,11 @@ pub(crate) async fn load_completer() -> Completer {
     };
 
     let resolver: lasso::RodeoResolver = pool.into_resolver();
-    let vanilla_controls_table = vanilla_controls_table
+
+    let vanilla_controls_table: BfastHashMap<
+        (Arc<str>, Arc<str>),
+        ControlDefine
+    > = vanilla_controls_table
         .into_iter()
         .map(|(k, v)| {
             let (v1, v2) = k;
@@ -347,11 +340,13 @@ pub(crate) async fn load_completer() -> Completer {
     let jsonui_define = lexer::parse_full(JSONUI_DEFINE)
         .await
         .expect("can parse jsonui_define.json");
-    let jsonui_define_map: HashMap<String, lexer::Token> = lexer::to_map(jsonui_define.1);
+    let jsonui_define_map: BfastHashMap<String, lexer::Token> =
+        lexer::to_map(jsonui_define.1);
+
     Completer::new(vanilla_controls_table, jsonui_define_map)
 }
 
-#[tokio::main(flavor = "current_thread")]
+#[tokio::main]
 async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();

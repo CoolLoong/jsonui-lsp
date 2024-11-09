@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::{self, Display};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -15,6 +15,7 @@ use walkdir::WalkDir;
 
 use crate::document::Document;
 use crate::lexer::prelude::*;
+use crate::museair::{BfastDashMap, BfastHashMap, BfastHashSet};
 use crate::tower_lsp::*;
 use crate::tree_ds::prelude::*;
 use crate::StdMutex;
@@ -42,7 +43,7 @@ pub(crate) struct PooledControlDefine {
     pub(crate) name:      Spur,
     pub(crate) extend:    Option<(Spur, Spur)>,
     pub(crate) type_n:    Option<Spur>,
-    pub(crate) variables: HashSet<Spur>,
+    pub(crate) variables: BfastHashSet<Spur>,
 }
 impl PooledControlDefine {
     pub(crate) fn to(&self, resolver: &lasso::RodeoResolver) -> ControlDefine {
@@ -53,7 +54,7 @@ impl PooledControlDefine {
             None
         };
         let type_n = self.type_n.as_ref().map(|v| Arc::from(resolver.resolve(v)));
-        let variables: HashSet<Arc<str>> = self
+        let variables: BfastHashSet<Arc<str>> = self
             .variables
             .iter()
             .map(|f| Arc::from(resolver.resolve(f)))
@@ -72,7 +73,7 @@ pub(crate) struct ControlDefine {
     pub(crate) name:      Arc<str>,
     pub(crate) extend:    Option<(Arc<str>, Arc<str>)>,
     pub(crate) type_n:    Mutex<Option<Arc<str>>>,
-    pub(crate) variables: Mutex<HashSet<Arc<str>>>,
+    pub(crate) variables: Mutex<BfastHashSet<Arc<str>>>,
 }
 impl Clone for ControlDefine {
     fn clone(&self) -> Self {
@@ -132,82 +133,50 @@ pub(crate) struct BuildTreeContext {
 #[derive(Debug)]
 pub(crate) struct RecursiveSearchContext {
     type_n:    RefCell<Option<Arc<str>>>,
-    variables: RefCell<HashSet<Arc<str>>>,
+    variables: RefCell<BfastHashSet<Arc<str>>>,
     layer:     AtomicUsize,
 }
 impl RecursiveSearchContext {
     pub fn new() -> Self {
         RecursiveSearchContext {
             type_n:    RefCell::new(None),
-            variables: RefCell::new(HashSet::new()),
+            variables: RefCell::new(BfastHashSet::default()),
             layer:     AtomicUsize::new(0),
         }
     }
 }
 
-fn find_namespace(tokens: &[Token]) -> Option<String> {
-    tokens
-        .iter()
-        .enumerate()
-        .find(|(_, token)| {
-            if let Token::Str(_, v) = token {
-                v.as_str() == "namespace"
-            } else {
-                false
-            }
-        })
-        .and_then(|(index, _)| match tokens.get(index + 2) {
-            Some(Token::Str(_, s)) => Some(s.clone()),
-            _ => None,
-        })
-}
-
-fn split_control_name(name: &str, def_namespace: &str) -> (Rc<str>, Rc<str>, Rc<str>) {
-    let mut part1 = "";
-    let mut part2 = "";
-    let mut part3 = "";
-    let parts: Vec<&str> = name.split('@').collect();
-    let namespace_parts = match parts.len() {
-        2 => {
-            part1 = parts[0];
-            parts[1].split('.').collect()
-        }
-        1 => {
-            part1 = parts[0];
-            vec![]
-        }
-        _ => {
-            vec![]
-        }
-    };
-    match namespace_parts.len() {
-        2 => {
-            part2 = namespace_parts[0];
-            part3 = namespace_parts[1];
-        }
-        1 => {
-            part2 = def_namespace;
-            part3 = namespace_parts[0];
-        }
-        _ => {}
-    }
-    (Rc::from(part1), Rc::from(part2), Rc::from(part3))
+#[derive(Debug, Clone)]
+struct SymbolInfo {
+    name: Arc<str>,
+    definition: Location,
+    references: Vec<Location>,
 }
 
 pub struct Completer {
-    pub(crate) trees:       RwLock<HashMap<Arc<str>, AutoTree<ControlNode>>>,
-    documents:              DashMap<u64, Document>,
-    vanilla_controls_table: HashMap<(Arc<str>, Arc<str>), ControlDefine>,
-    jsonui_define:          HashMap<String, Token>,
+    pub(crate) trees: RwLock<BfastHashMap<Arc<str>, AutoTree<ControlNode>>>,
+    documents: BfastDashMap<Url, Document>,
+    urls: BfastDashMap<Arc<str>, Url>,
+    symbol_table: BfastDashMap<Arc<str>, SymbolInfo>,
+    vanilla_controls_table: BfastHashMap<(Arc<str>, Arc<str>), ControlDefine>,
+    jsonui_define: BfastHashMap<String, Token>,
 }
 impl Completer {
     pub fn new(
-        vanilla_controls_table: HashMap<(Arc<str>, Arc<str>), ControlDefine>,
-        jsonui_define: HashMap<String, Token>,
+        vanilla_controls_table: BfastHashMap<(Arc<str>, Arc<str>), ControlDefine>,
+        jsonui_define: BfastHashMap<String, Token>,
     ) -> Self {
         Completer {
-            trees: RwLock::new(HashMap::new()),
-            documents: DashMap::with_shard_amount(2),
+            trees: RwLock::new(BfastHashMap::default()),
+            documents: DashMap::with_hasher_and_shard_amount(
+                crate::museair::BfastHash::<true>::new(),
+                2,
+            ),
+            urls: DashMap::with_hasher_and_shard_amount(crate::museair::BfastHash::<true>::new(), 2),
+            symbol_table: DashMap::with_hasher_and_shard_amount(
+                crate::museair::BfastHash::<true>::new(),
+                2,
+            ),
             vanilla_controls_table,
             jsonui_define,
         }
@@ -241,11 +210,11 @@ impl Completer {
 
     pub(crate) async fn complete(
         &self,
-        id: u64,
+        url: &Url,
         lang: Arc<str>,
         param: &CompletionParams,
     ) -> Option<Vec<CompletionItem>> {
-        let doc = self.documents.get(&id);
+        let doc = self.documents.get(url);
         if let Some(doc) = doc {
             let input = doc.get_content().await;
             let pos = param.text_document_position.position;
@@ -303,8 +272,8 @@ impl Completer {
         None
     }
 
-    pub async fn complete_color(&self, id: u64) -> Option<Vec<ColorInformation>> {
-        let doc = self.documents.get(&id);
+    pub async fn complete_color(&self, url: &Url) -> Option<Vec<ColorInformation>> {
+        let doc = self.documents.get(url);
         if let Some(doc) = doc {
             let input = doc.get_content().await;
             let r = parse_full(input.as_ref()).await;
@@ -315,20 +284,21 @@ impl Completer {
         None
     }
 
-    pub(crate) async fn update_document(&self, id: u64, param: &DidChangeTextDocumentParams) {
-        let doc = self.documents.get(&id);
+    pub(crate) async fn update_document(&self, url: &Url, param: &DidChangeTextDocumentParams) {
+        let doc = self.documents.get(url);
         if let Some(doc) = doc {
             doc.apply_change(param).await;
         }
     }
 
-    pub(crate) async fn did_open(&self, id: u64, content: Arc<str>) {
+    pub(crate) async fn did_open(&self, url: Url, content: Arc<str>) {
         let np = Document::get_namespace(content.clone());
         if let Some(np) = np {
             let r = self
                 .documents
-                .entry(id)
+                .entry(url.clone())
                 .or_insert_with(|| Document::from(content));
+            self.urls.entry(Arc::from(np.as_str())).or_insert(url);
             if !self.contain_tree(np.as_str()) {
                 let input = r.get_content().await;
                 let r = parse_full(input.as_ref()).await;
@@ -348,24 +318,23 @@ impl Completer {
         }
     }
 
-    pub(crate) fn did_rename(&self, o_id: u64, n_id: u64) {
-        if let Some((_, v)) = self.documents.remove(&o_id) {
-            self.documents.insert(n_id, v);
+    pub(crate) fn did_rename(&self, o_url: &Url, n_url: Url) {
+        if let Some((_, v)) = self.documents.remove(o_url) {
+            let namespace = &v.get_cache_namespace();
+            self.urls.remove(namespace);
+            self.urls.insert(namespace.clone(), n_url.clone());
+            self.documents.insert(n_url, v);
         }
     }
 
-    pub(crate) fn did_close(&self, id: u64) {
-        let r = self.documents.remove(&id);
+    pub(crate) fn did_close(&self, url: &Url) {
+        let r = self.documents.remove(url);
         if let Some((_, v)) = r {
-            self.del_tree(&v.get_cache_namespace());
+            let namespace = &v.get_cache_namespace();
+            self.urls.remove(namespace);
+            self.del_tree(namespace);
         }
     }
-
-    // pub(crate) async fn input(pos: (usize, usize), doc: &Document) -> String {
-    //     let chars = doc.content_chars.lock().await;
-    //     let (l, r) = pos;
-    //     join(&chars[l..r + 1])
-    // }
 
     pub(crate) fn contain_tree(&self, name: &str) -> bool {
         self.trees
@@ -390,8 +359,7 @@ impl Completer {
         let (root_span, ref tokens) = result;
         let np = find_namespace(tokens);
         if let Some(np) = np {
-            let mut tr: Tree<AutomatedId, ControlNode> =
-                AutoTree::<ControlNode>::new(Some(np.as_str()));
+            let mut tr: Tree<AutomatedId, ControlNode> = AutoTree::<ControlNode>::new(Some(np.as_str()));
             let ctx = BuildTreeContext {
                 namespace:    Rc::from(np.as_ref()),
                 control_name: RefCell::new(Rc::from("()")),
@@ -404,7 +372,7 @@ impl Completer {
                     name:      Arc::from("root"),
                     extend:    None,
                     type_n:    Mutex::new(None),
-                    variables: Mutex::new(HashSet::<Arc<str>>::new()),
+                    variables: Mutex::new(BfastHashSet::<Arc<str>>::default()),
                 },
                 loc:    *root_span,
             };
@@ -431,7 +399,7 @@ impl Completer {
             let (name, np, extend) =
                 split_control_name(ctx.control_name.borrow().as_ref(), ctx.namespace.as_ref());
             let mut type_n = None;
-            let mut variables = HashSet::<Arc<str>>::new();
+            let mut variables = BfastHashSet::<Arc<str>>::default();
             let mut arrays = vec![];
 
             for (k, v) in m {
@@ -534,7 +502,7 @@ impl Completer {
     pub(crate) fn find_extend_value(
         &self,
         extend: &(Arc<str>, Arc<str>),
-    ) -> Option<(Arc<str>, HashSet<Arc<str>>)> {
+    ) -> Option<(Arc<str>, BfastHashSet<Arc<str>>)> {
         let ctx = RecursiveSearchContext::new();
         self.recursive_search(extend, &ctx);
         if let Some(type_n) = ctx.type_n.take() {
@@ -570,6 +538,55 @@ impl Completer {
             }
         }
     }
+}
+
+fn find_namespace(tokens: &[Token]) -> Option<String> {
+    tokens
+        .iter()
+        .enumerate()
+        .find(|(_, token)| {
+            if let Token::Str(_, v) = token {
+                v.as_str() == "namespace"
+            } else {
+                false
+            }
+        })
+        .and_then(|(index, _)| match tokens.get(index + 2) {
+            Some(Token::Str(_, s)) => Some(s.clone()),
+            _ => None,
+        })
+}
+
+fn split_control_name(name: &str, def_namespace: &str) -> (Rc<str>, Rc<str>, Rc<str>) {
+    let mut part1 = "";
+    let mut part2 = "";
+    let mut part3 = "";
+    let parts: Vec<&str> = name.split('@').collect();
+    let namespace_parts = match parts.len() {
+        2 => {
+            part1 = parts[0];
+            parts[1].split('.').collect()
+        }
+        1 => {
+            part1 = parts[0];
+            vec![]
+        }
+        _ => {
+            vec![]
+        }
+    };
+    match namespace_parts.len() {
+        2 => {
+            part2 = namespace_parts[0];
+            part3 = namespace_parts[1];
+        }
+        1 => {
+            part2 = def_namespace;
+            part3 = namespace_parts[0];
+        }
+        _ => {}
+    }
+    (Rc::from(part1), Rc::from(part2), Rc::from(part3))
 }
 
 #[cfg(test)]

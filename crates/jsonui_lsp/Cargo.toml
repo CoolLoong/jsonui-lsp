@@ -8,7 +8,7 @@ keywords = ["minecraft", "jsonui", "lsp", "vscode", "extension"]
 categories = ["development-tools"]
 
 [dependencies]
-tokio = { version = "1.41.1", features = ["rt", "macros", "io-std"] }
+tokio = { version = "1.41.1", features = ["rt", "macros", "io-std", "rt-multi-thread"] }
 tower-lsp = "0.20.0"
 log = "0.4"
 flexi_logger = "0.29.6"

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use log::trace;
@@ -6,6 +6,7 @@ use log::trace;
 use crate::completer::{AutoTree, Completer, ControlNode};
 use crate::document::Document;
 use crate::lexer::prelude::*;
+use crate::museair::{BfastHashMap, BfastHashSet};
 use crate::tower_lsp::*;
 use crate::tree_ds::prelude::{AutomatedId, Node};
 
@@ -52,7 +53,7 @@ pub(crate) fn normal(
     lang: Arc<str>,
     tokens: &[Token],
     tree: &AutoTree<ControlNode>,
-    define_map: &HashMap<String, Token>,
+    define_map: &BfastHashMap<String, Token>,
 ) -> Option<Vec<CompletionItem>> {
     let root = tree.get_root_node().expect("cant get root node");
     let r = find_closest_node(tree, &root, index);
@@ -149,7 +150,7 @@ pub(crate) fn normal(
     None
 }
 
-fn create_type_input<'a>(type_n: &'a String, define_map: &'a HashMap<String, Token>) -> Vec<&'a Token> {
+fn create_type_input<'a>(type_n: &'a String, define_map: &'a BfastHashMap<String, Token>) -> Vec<&'a Token> {
     let mut inputs: Vec<&Token> = vec![];
     if let Some(Token::Array(_, arr)) = define_map.get(type_n) {
         inputs.extend(arr.as_ref().unwrap());
@@ -161,7 +162,7 @@ fn create_type_input<'a>(type_n: &'a String, define_map: &'a HashMap<String, Tok
 fn create_binding_type_input<'a>(
     index: usize,
     boundary: Vec<&'a Token>,
-    define_map: &'a HashMap<String, Token>,
+    define_map: &'a BfastHashMap<String, Token>,
     current: &'a Token,
 ) -> Vec<&'a Token> {
     let mut r = vec![];
@@ -207,7 +208,7 @@ fn create_binding_type_input<'a>(
 fn create_variables_completion(
     completer: &Completer,
     n: Node<AutomatedId, ControlNode>,
-) -> HashSet<Arc<str>> {
+) -> BfastHashSet<Arc<str>> {
     if let Some(v) = n.get_value()
         && let Some(extend) = &v.define.extend
     {
@@ -219,24 +220,14 @@ fn create_variables_completion(
             return r;
         }
     }
-    HashSet::default()
+    BfastHashSet::default()
 }
 
 fn find_neighbors_token<'a>(flatted_tokens: &[&'a Token], index: usize) -> Vec<Option<&'a Token>> {
     let closed_index = flatted_tokens
         .iter()
-        .map(|v| match v {
-            Token::Bool(i, _)
-            | Token::Str(i, _)
-            | Token::Num(i, _)
-            | Token::Colon(i)
-            | Token::Comma(i)
-            | Token::Array(i, _)
-            | Token::Object(i, _) => *i,
-            Token::Null() => (0, 0),
-        })
+        .map(|v| v.pos())
         .rposition(|s| s.0 <= index);
-
     let mut neighbors: Vec<Option<&'a Token>> = Vec::with_capacity(5);
     if let Some(i) = closed_index {
         let i = i as isize;
@@ -491,8 +482,8 @@ fn create_value_completion(
     char: Arc<str>,
     lang: Arc<str>,
     property: &str,
-    define_map: &HashMap<String, Token>,
-    extra_values: &HashSet<Arc<str>>,
+    define_map: &BfastHashMap<String, Token>,
+    extra_values: &BfastHashSet<Arc<str>>,
 ) -> Option<Vec<CompletionItem>> {
     let mut result = Vec::new();
     let c = char.as_ref();
@@ -571,7 +562,7 @@ fn create_value_completion(
                             let d = if let Token::Object(_, d) = d {
                                 to_map_ref(d.as_ref().unwrap())
                             } else {
-                                HashMap::new()
+                                BfastHashMap::default()
                             };
                             d.get(&lang.to_string())
                                 .or(d.get("en-us"))
@@ -636,7 +627,7 @@ fn create_type_completion(
     inputs: Vec<&Token>,
     pos: Position,
     lang: Arc<str>,
-    define_map: &HashMap<String, Token>,
+    define_map: &BfastHashMap<String, Token>,
 ) -> Option<Vec<CompletionItem>> {
     let mut result = Vec::new();
     for (index, av) in inputs.into_iter().enumerate() {
@@ -647,7 +638,7 @@ fn create_type_completion(
                     .get("description")
                     .map(|f| match f {
                         Token::Object(_, v) => to_map_ref(v.as_ref().unwrap()),
-                        _ => HashMap::new(),
+                        _ => BfastHashMap::default(),
                     })
                     .unwrap_or_default();
                 result.push(CompletionItem {
