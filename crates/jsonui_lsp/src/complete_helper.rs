@@ -241,7 +241,7 @@ async fn create_variables_completion(
         if let Some((_, vars)) = extend_v {
             let r = v.define.variables.lock().expect("cant get variables lock");
             let mut r = r.clone();
-            r.extend(vars.iter().map(|f| f.clone()));
+            r.extend(vars.iter().cloned());
             return r;
         }
     }

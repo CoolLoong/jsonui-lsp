@@ -43,7 +43,7 @@ fn main() -> io::Result<()> {
     let map: &RefCell<HashMap<String, Value>> = namespace_map.borrow();
     for (k, v) in map.borrow().iter() {
         let mut export_map: HashMap<String, serde_json::Value> = HashMap::new();
-        process_properties(None, &k.clone(), &v, &mut export_map, &map.borrow());
+        process_properties(None, &k.clone(), v, &mut export_map, &map.borrow());
         result.insert(k.clone(), export_map);
     }
 
@@ -56,7 +56,7 @@ fn main() -> io::Result<()> {
         Ok(file) => file,
         Err(e) => {
             println!("Failed to create file: {:?}", e);
-            return Err(e.into());
+            return Err(e);
         }
     };
     if let Err(e) = serde_json::to_writer_pretty(output_file, &result) {
@@ -101,7 +101,7 @@ fn process_properties(
         }
 
         if key.contains('@') {
-            handle_namespace(key, &namespace, namespace_map, name, export_map);
+            handle_namespace(key, namespace, namespace_map, name, export_map);
         } else if key == "type" {
             set_export_type(export_map, &np, value.as_str().unwrap());
         } else if key.starts_with('$') {
