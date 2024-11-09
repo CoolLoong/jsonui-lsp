@@ -62,8 +62,8 @@ impl PooledControlDefine {
             .map(|f| Arc::from(resolver.resolve(f)))
             .collect();
         ControlDefine {
-            name: (name, extend),
-            type_n: Mutex::new(type_n),
+            name:      (name, extend),
+            type_n:    Mutex::new(type_n),
             variables: Mutex::new(variables),
         }
     }
@@ -71,15 +71,15 @@ impl PooledControlDefine {
 
 #[derive(Debug, Default)]
 pub(crate) struct ControlDefine {
-    pub(crate) name: ControlName,
-    pub(crate) type_n: Mutex<Option<Arc<str>>>,
+    pub(crate) name:      ControlName,
+    pub(crate) type_n:    Mutex<Option<Arc<str>>>,
     pub(crate) variables: Mutex<BfastHashSet<Arc<str>>>,
 }
 impl Clone for ControlDefine {
     fn clone(&self) -> Self {
         ControlDefine {
-            name: Clone::clone(&self.name),
-            type_n: Mutex::new(self.type_n.try_lock().expect("cant get type_n lock").clone()),
+            name:      Clone::clone(&self.name),
+            type_n:    Mutex::new(self.type_n.try_lock().expect("cant get type_n lock").clone()),
             variables: Mutex::new(self.variables.try_lock().expect("cant get type_n lock").clone()),
         }
     }
@@ -118,27 +118,27 @@ impl Display for ControlDefine {
 }
 
 #[derive(Debug)]
-pub(crate) struct BuildTreeContext {
-    url: Url,
-    document: Arc<Document>,
-    tree: Mutex<Tree<AutomatedId, ControlNode>>,
+pub(crate) struct BuildTreeContext<'a> {
+    url:          Url,
+    document:     &'a Document,
+    tree:         Mutex<Tree<AutomatedId, ControlNode>>,
     symbol_table: Mutex<BfastHashMap<ControlNameSymbol, Location>>,
     control_name: Mutex<Option<Arc<str>>>,
-    last_node: Mutex<Option<AutomatedId>>,
-    loc: Mutex<(usize, usize)>,
+    last_node:    Mutex<Option<AutomatedId>>,
+    loc:          Mutex<(usize, usize)>,
     layer:        AtomicUsize,
 }
 
 #[derive(Debug)]
 pub(crate) struct RecursiveSearchContext {
-    type_n: Mutex<Option<Arc<str>>>,
+    type_n:    Mutex<Option<Arc<str>>>,
     variables: Mutex<BfastHashSet<Arc<str>>>,
     layer:     AtomicUsize,
 }
 impl RecursiveSearchContext {
     pub fn new() -> Self {
         RecursiveSearchContext {
-            type_n: Mutex::new(None),
+            type_n:    Mutex::new(None),
             variables: Mutex::new(BfastHashSet::default()),
             layer:     AtomicUsize::new(0),
         }
@@ -154,13 +154,13 @@ impl ControlNameSymbol {
 }
 
 pub struct Completer {
-    pub(crate) trees: RwLock<BfastHashMap<Arc<str>, Arc<AutoTree<ControlNode>>>>,
-    documents: BfastDashMap<Url, Arc<Document>>,
-    caches: BfastDashMap<Arc<str>, Arc<Vec<Token>>>,
-    urls: BfastDashMap<Arc<str>, Url>,
-    symbol_table: BfastDashMap<ControlNameSymbol, Location>,
+    pub(crate) trees:       RwLock<BfastHashMap<Arc<str>, AutoTree<ControlNode>>>,
+    documents:              BfastDashMap<Url, Document>,
+    caches:                 BfastDashMap<Arc<str>, Vec<Token>>,
+    urls:                   BfastDashMap<Arc<str>, Url>,
+    symbol_table:           BfastDashMap<ControlNameSymbol, Location>,
     vanilla_controls_table: BfastHashMap<(Arc<str>, Arc<str>), ControlDefine>,
-    jsonui_define: BfastHashMap<String, Token>,
+    jsonui_define:          BfastHashMap<String, Token>,
 }
 impl Completer {
     pub fn new(
@@ -206,8 +206,7 @@ impl Completer {
     ) -> Option<Vec<CompletionItem>> {
         let doc = self.documents.get(url);
         if let Some(doc) = doc {
-            let r = doc.deref().clone();
-            if let Some((k, v, tokens, symbols)) = Self::build_tree(url, r) {
+            if let Some((k, v, tokens, symbols)) = Self::build_tree(url, &doc) {
                 let pos = param.text_document_position.position;
                 let index = doc.get_index_from_position(pos);
                 let index_value;
@@ -247,8 +246,8 @@ impl Completer {
                     &self.jsonui_define,
                 );
 
-                self.add_tree(k.as_ref(), Arc::new(v));
-                self.caches.insert(k.clone(), Arc::new(tokens));
+                self.add_tree(k.clone(), v);
+                self.caches.insert(k, tokens);
                 symbols.into_iter().for_each(|(k, v)| {
                     self.symbol_table.insert(k, v);
                 });
@@ -279,10 +278,7 @@ impl Completer {
         None
     }
 
-    pub fn goto_definition(
-        &self,
-        params: &GotoDefinitionParams,
-    ) -> Option<GotoDefinitionResponse> {
+    pub fn goto_definition(&self, params: &GotoDefinitionParams) -> Option<GotoDefinitionResponse> {
         let param = &params.text_document_position_params;
         let url = &param.text_document.uri;
         let pos = &param.position;
@@ -294,19 +290,19 @@ impl Completer {
 
             if !doc.is_dirty() {
                 if let Some(v) = self.caches.get(&namespace) {
-                    return crate::complete_helper::goto_definition(self, namespace, v.clone(), index);
+                    return crate::complete_helper::goto_definition(self, namespace, &v, index);
                 }
             }
 
-            if let Some((k, v, tokens, symbols)) = Self::build_tree(url, doc.clone()) {
-                let tokens = Arc::new(tokens);
-                self.add_tree(k.as_ref(), Arc::new(v));
-                self.caches.insert(k.clone(), tokens.clone());
+            if let Some((k, v, tokens, symbols)) = Self::build_tree(url, &doc) {
+                let r = crate::complete_helper::goto_definition(self, k.clone(), &tokens, index);
+                self.add_tree(k.clone(), v);
+                self.caches.insert(k, tokens);
                 symbols.into_iter().for_each(|(k, v)| {
                     self.symbol_table.insert(k, v);
                 });
                 doc.clear_dirty();
-                return crate::complete_helper::goto_definition(self, k.clone(), tokens, index);
+                return r;
             }
         }
         None
@@ -322,12 +318,12 @@ impl Completer {
     pub(crate) fn did_open(&self, url: Url, content: Arc<str>) {
         let np = Document::get_namespace(content.clone());
         if let Some(np) = np {
-            let doc: Arc<Document> = Arc::new(Document::from(content));
-            self.documents.insert(url.clone(), doc.clone());
-            if let Some((k, v, tokens, symbols)) = Self::build_tree(&url, doc) {
-                self.urls.insert(Arc::from(np.as_str()), url.clone());
-                self.add_tree(k.as_ref(), Arc::new(v));
-                self.caches.insert(k.clone(), Arc::new(tokens));
+            let doc = Document::from(content);
+            if let Some((k, v, tokens, symbols)) = Self::build_tree(&url, &doc) {
+                self.documents.insert(url.clone(), doc);
+                self.urls.insert(k.clone(), url);
+                self.add_tree(k.clone(), v);
+                self.caches.insert(k, tokens);
                 symbols.into_iter().for_each(|(k, v)| {
                     self.symbol_table.insert(k, v);
                 });
@@ -375,8 +371,8 @@ impl Completer {
         self.trees.read().contains_key(name)
     }
 
-    pub(crate) fn add_tree(&self, k: &str, v: Arc<Tree<AutomatedId, ControlNode>>) {
-        self.trees.write().insert(Arc::from(k), v);
+    pub(crate) fn add_tree(&self, k: Arc<str>, v: Tree<AutomatedId, ControlNode>) {
+        self.trees.write().insert(k, v);
     }
 
     pub(crate) fn del_tree(&self, k: &str) {
@@ -385,7 +381,7 @@ impl Completer {
 
     fn build_tree(
         url: &Url,
-        document: Arc<Document>,
+        document: &Document,
     ) -> Option<(
         Arc<str>,
         Tree<AutomatedId, ControlNode>,
@@ -410,11 +406,11 @@ impl Completer {
                 };
                 let root = ControlNode {
                     define: ControlDefine {
-                        name: (Arc::from("root"), None),
-                        type_n: Mutex::new(None),
+                        name:      (Arc::from("root"), None),
+                        type_n:    Mutex::new(None),
                         variables: Mutex::new(BfastHashSet::default()),
                     },
-                    loc: range,
+                    loc:    range,
                 };
                 Self::add_tree_node(&ctx, root, None);
                 Self::build_control_tree(&tokens, &ctx);
@@ -435,9 +431,7 @@ impl Completer {
         }
 
         let m = to_map_with_span_ref(tokens);
-        let v = {
-            ctx.control_name.lock().take()
-        };
+        let v = { ctx.control_name.lock().take() };
         let np = ctx.document.get_cache_namespace();
         if let Some(v) = v {
             let (name, extend) = split_control_name(v.as_ref(), np.as_ref());
@@ -460,21 +454,17 @@ impl Completer {
 
             let type_n = type_n.map(|f| Arc::from(f.as_str()));
 
-            let loc = {
-                *ctx.loc.lock()
-            };
+            let loc = { *ctx.loc.lock() };
             let node = ControlNode {
                 define: ControlDefine {
-                    name: (name, extend),
-                    type_n: Mutex::new(type_n),
+                    name:      (name, extend),
+                    type_n:    Mutex::new(type_n),
                     variables: Mutex::new(variables),
                 },
                 loc,
             };
 
-            let option = {
-                ctx.last_node.lock().take()
-            };
+            let option = { ctx.last_node.lock().take() };
             let option = option.as_ref();
             Self::add_tree_node(ctx, node, option);
 

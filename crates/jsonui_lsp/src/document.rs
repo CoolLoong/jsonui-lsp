@@ -8,11 +8,10 @@ use crate::towerlsp::*;
 
 #[derive(Debug)]
 pub struct Document {
-    namespace: String,
-    line_info_cache: Mutex<Vec<LineInfo>>,
-    content_cache: Mutex<String>,
+    namespace:        String,
+    line_info_cache:  Mutex<Vec<LineInfo>>,
     pub(crate) chars: Mutex<Vec<Arc<str>>>,
-    dirty: AtomicBool,
+    dirty:            AtomicBool,
 }
 
 #[derive(Debug)]
@@ -28,14 +27,13 @@ impl Document {
         Self {
             namespace,
             line_info_cache: Self::init_line_info_cache(str.as_ref()),
-            content_cache: Mutex::new(str.to_string()),
             chars: Mutex::new(content_chars),
             dirty: AtomicBool::new(false),
         }
     }
 
-    pub fn get_content(&self) -> Arc<str> {
-        Arc::from(self.content_cache.lock().as_str())
+    pub fn get_content(&self) -> String {
+        self.chars.lock().iter().map(|arc_str| arc_str.as_ref()).collect()
     }
 
     pub fn get_cache_namespace(&self) -> Arc<str> {
@@ -90,7 +88,7 @@ impl Document {
                 if index < current_index + info.char_count {
                     let character = index - current_index;
                     return Some(Position {
-                        line: line_num as u32,
+                        line:      line_num as u32,
                         character: character as u32,
                     });
                 }
@@ -113,7 +111,7 @@ impl Document {
                 {
                     self.replace_grapheme_range(si, ei, Arc::from(e.text.as_str()));
                     let mut line_cache = self.line_info_cache.lock();
-                    let content = self.content_cache.lock();
+                    let content = self.get_content();
                     *line_cache = Self::build_line_info_cache(&content);
                 }
             }
@@ -213,9 +211,6 @@ impl Document {
                     .collect::<Vec<Arc<str>>>(),
             );
             result.extend_from_slice(after);
-
-            let mut content = self.content_cache.lock();
-            *content = result.join("");
             *chars = result;
         }
     }
@@ -346,8 +341,7 @@ mod tests {
         document.apply_change(&request);
         #[rustfmt::skip]
         assert!(document
-            .content_cache
-            .lock()
+            .get_content()
             .contains(r#""clip_pixelperfect": false,
     """#));
     }
@@ -376,7 +370,7 @@ mod tests {
             }],
         };
         document.apply_change(&request);
-        let docs = document.content_cache.lock();
+        let docs = document.get_content();
         #[rustfmt::skip]
         assert!(docs.contains("\"clip_direction\": \"\""));
     }
@@ -385,11 +379,11 @@ mod tests {
     fn test_replace_grapheme_range() {
         let document = Document::from(Arc::from("hello 世界"));
         document.replace_grapheme_range(5, 5, Arc::from("MMM"));
-        assert_eq!(*document.content_cache.lock(), "helloMMM 世界");
+        assert_eq!(document.get_content().as_str(), "helloMMM 世界");
         document.replace_grapheme_range(5, 8, Arc::from("XXX"));
-        assert_eq!(*document.content_cache.lock(), "helloXXX 世界");
+        assert_eq!(document.get_content().as_str(), "helloXXX 世界");
         document.replace_grapheme_range(8, 8, Arc::from("D"));
-        assert_eq!(*document.content_cache.lock(), "helloXXXD 世界");
+        assert_eq!(document.get_content().as_str(), "helloXXXD 世界");
     }
 
     #[test]
@@ -430,7 +424,7 @@ mod tests {
         let result = Document::get_namespace(Arc::from(
             r#"// this is comment{"test_control": {"type": "panel"},"namespace": "test"}"#,
         ))
-            .unwrap();
+        .unwrap();
         let expect = "test";
         assert_eq!(result, expect);
     }

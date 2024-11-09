@@ -154,10 +154,10 @@ pub(crate) fn normal(
 pub(crate) fn goto_definition(
     completer: &Completer,
     namespace: Arc<str>,
-    tokens: Arc<Vec<Token>>,
+    tokens: &[Token],
     index: usize,
 ) -> Option<GotoDefinitionResponse> {
-    let tokens = flatten_tokens(tokens.as_ref());
+    let tokens = flatten_tokens(tokens);
     let token = tokens
         .iter()
         .find(|f| matches!(f, Token::Str(range, _) if range.0 <= index && index<=range.1));

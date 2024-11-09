@@ -1,7 +1,7 @@
+use lasso::Rodeo;
+use log::trace;
 use std::collections::VecDeque;
 use std::sync::Arc;
-
-use log::trace;
 
 use crate::document::Document;
 use crate::museair::BfastHashMap;
@@ -491,7 +491,6 @@ pub(crate) fn parse(range: Option<(usize, usize)>, input: &str) -> Option<Vec<To
 
 pub(crate) fn to_map(tokens: Vec<Token>) -> BfastHashMap<String, Token> {
     let mut key = String::new();
-
     let mut collect = false;
     let mut r = BfastHashMap::default();
 
@@ -515,7 +514,6 @@ pub(crate) fn to_map(tokens: Vec<Token>) -> BfastHashMap<String, Token> {
             _ => {}
         }
     }
-
     r
 }
 
