@@ -520,11 +520,37 @@ pub(crate) fn to_map(tokens: Vec<Token>) -> BfastHashMap<String, Token> {
     r
 }
 
+pub(crate) fn to_map_with_span_ref(
+    tokens: &Vec<Token>,
+) -> BfastHashMap<((usize, usize), String), &Token> {
+    let mut key = ((0, 0), String::new());
+    let mut collect = false;
+    let mut r = BfastHashMap::default();
+
+    for i in tokens {
+        match i {
+            Token::Str(span, v) => {
+                if collect {
+                    r.insert(std::mem::take(&mut key), i);
+                    collect = false;
+                } else {
+                    key = (*span, v.to_string())
+                }
+            }
+            Token::Colon(_) => collect = true,
+            _ if collect => {
+                r.insert(std::mem::take(&mut key), i);
+                collect = false;
+            }
+            _ => {}
+        }
+    }
+    r
+}
+
 pub(crate) fn to_map_ref(tokens: &Vec<Token>) -> BfastHashMap<String, &Token> {
     let mut key = String::new();
-
     let mut collect = false;
-
     let mut r = BfastHashMap::default();
 
     for i in tokens {
@@ -547,7 +573,6 @@ pub(crate) fn to_map_ref(tokens: &Vec<Token>) -> BfastHashMap<String, &Token> {
             _ => {}
         }
     }
-
     r
 }
 
@@ -629,8 +654,7 @@ pub(crate) fn to_number_ref(token: &Token) -> f32 {
 #[allow(unused_imports)]
 pub(crate) mod prelude {
     pub(crate) use super::{
-        parse_full, to_array_ref, to_map_ref,
-        to_number_ref, to_string_ref, Token,
+        parse_full, to_array_ref, to_map_ref, to_map_with_span_ref, to_number_ref, to_string_ref, Token,
     };
 }
 

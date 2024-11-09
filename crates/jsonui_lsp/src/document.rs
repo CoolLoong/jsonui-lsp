@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
@@ -11,6 +12,7 @@ pub struct Document {
     line_info_cache: Mutex<Vec<LineInfo>>,
     content_cache: Mutex<String>,
     pub(crate) chars: Mutex<Vec<Arc<str>>>,
+    dirty: AtomicBool,
 }
 
 #[derive(Debug)]
@@ -28,6 +30,7 @@ impl Document {
             line_info_cache: Self::init_line_info_cache(str.as_ref()),
             content_cache: Mutex::new(str.to_string()),
             chars: Mutex::new(content_chars),
+            dirty: AtomicBool::new(false),
         }
     }
 
@@ -37,6 +40,14 @@ impl Document {
 
     pub fn get_cache_namespace(&self) -> Arc<str> {
         Arc::from(self.namespace.as_str())
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.dirty.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub fn clear_dirty(&self) {
+        self.dirty.store(false, std::sync::atomic::Ordering::Release)
     }
 
     /// position line index start from 0
@@ -66,7 +77,6 @@ impl Document {
     /// Index starts from 0.
     pub async fn get_position_from_index(&self, index: usize) -> Option<Position> {
         let line_cache = self.line_info_cache.lock().await;
-
         // Calculate the total number of characters in the document
         let total_chars = line_cache.iter().map(|info| info.char_count).sum::<usize>();
 
@@ -112,6 +122,7 @@ impl Document {
                 }
             }
         }
+        self.dirty.store(true, std::sync::atomic::Ordering::Release);
     }
 
     pub async fn get_boundary_indices(&self, index: usize) -> Option<(usize, usize)> {
@@ -230,7 +241,7 @@ impl Document {
         line_info_table
     }
 
-    fn handle_boundary_char<'a>(char: &'a str, boundary_stacks: &mut Vec<Vec<&'a str>>) {
+    fn handle_boundary_char<'a>(char: &'a str, boundary_stacks: &mut [Vec<&'a str>]) {
         let (current_index, opposite_index) = match char {
             "{" => (0, 1),
             "}" => (1, 0),

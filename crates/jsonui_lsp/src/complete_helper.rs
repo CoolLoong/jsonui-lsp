@@ -1,9 +1,8 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use log::trace;
 
-use crate::completer::{AutoTree, Completer, ControlNode};
+use crate::completer::{split_control_name, AutoTree, Completer, ControlNameSymbol, ControlNode};
 use crate::document::Document;
 use crate::lexer::prelude::*;
 use crate::museair::{BfastHashMap, BfastHashSet};
@@ -44,7 +43,7 @@ pub(crate) async fn color(doc: &Document, tokens: &[Token]) -> Option<Vec<ColorI
     }
 }
 
-pub(crate) fn normal(
+pub(crate) async fn normal(
     completer: &Completer,
     index: usize,
     boundary_indices: (usize, usize),
@@ -100,7 +99,7 @@ pub(crate) fn normal(
                         && v.is_empty()
                     {
                         trace!("create_value_completion");
-                        let extra_values = create_variables_completion(completer, n);
+                        let extra_values = create_variables_completion(completer, n).await;
                         return create_value_completion(
                             pos,
                             n3,
@@ -114,7 +113,7 @@ pub(crate) fn normal(
                         && let Some(Token::Colon(_)) = current
                     {
                         trace!("create_value_completion");
-                        let extra_values = create_variables_completion(completer, n);
+                        let extra_values = create_variables_completion(completer, n).await;
                         return create_value_completion(
                             pos,
                             n3,
@@ -132,7 +131,7 @@ pub(crate) fn normal(
                         let node = n.get_value().unwrap();
                         let r = if let Some(r) = node.get_type() {
                             r
-                        } else if let Some(extend) = node.define.extend
+                        } else if let Some(extend) = node.define.name.1
                             && let Some((r, _)) = completer.find_extend_value(&extend)
                         {
                             r.to_string()
@@ -150,7 +149,33 @@ pub(crate) fn normal(
     None
 }
 
-fn create_type_input<'a>(type_n: &'a String, define_map: &'a BfastHashMap<String, Token>) -> Vec<&'a Token> {
+pub(crate) fn goto_definition(
+    completer: &Completer,
+    namespace: Arc<str>,
+    tokens: Arc<Vec<Token>>,
+    index: usize,
+) -> Option<GotoDefinitionResponse> {
+    let tokens = flatten_tokens(tokens.as_ref());
+    let token = tokens
+        .iter()
+        .find(|f| matches!(f, Token::Str(range, _) if range.0 <= index && index<=range.1));
+    if let Some(Token::Str(_, token)) = token {
+        if token.contains("@") {
+            let name = split_control_name(token.as_str(), namespace.as_ref());
+            if let Some(name) = name.1 {
+                let symbol = ControlNameSymbol::new(name);
+                let r = completer.find_symbol(&symbol)?;
+                return Some(GotoDefinitionResponse::Scalar(r));
+            }
+        }
+    }
+    None
+}
+
+fn create_type_input<'a>(
+    type_n: &'a String,
+    define_map: &'a BfastHashMap<String, Token>,
+) -> Vec<&'a Token> {
     let mut inputs: Vec<&Token> = vec![];
     if let Some(Token::Array(_, arr)) = define_map.get(type_n) {
         inputs.extend(arr.as_ref().unwrap());
@@ -205,18 +230,18 @@ fn create_binding_type_input<'a>(
     r
 }
 
-fn create_variables_completion(
+async fn create_variables_completion(
     completer: &Completer,
     n: Node<AutomatedId, ControlNode>,
 ) -> BfastHashSet<Arc<str>> {
     if let Some(v) = n.get_value()
-        && let Some(extend) = &v.define.extend
+        && let Some(extend) = &v.define.name.1
     {
         let extend_v = completer.find_extend_value(extend);
-        if let Some(extend_v) = extend_v {
-            let vars = v.define.variables.lock().unwrap();
-            let mut r = vars.clone();
-            r.extend(extend_v.1);
+        if let Some((_, vars)) = extend_v {
+            let r = v.define.variables.lock().expect("cant get variables lock");
+            let mut r = r.clone();
+            r.extend(vars.iter().map(|f| f.clone()));
             return r;
         }
     }
@@ -224,10 +249,7 @@ fn create_variables_completion(
 }
 
 fn find_neighbors_token<'a>(flatted_tokens: &[&'a Token], index: usize) -> Vec<Option<&'a Token>> {
-    let closed_index = flatted_tokens
-        .iter()
-        .map(|v| v.pos())
-        .rposition(|s| s.0 <= index);
+    let closed_index = flatted_tokens.iter().map(|v| v.pos()).rposition(|s| s.0 <= index);
     let mut neighbors: Vec<Option<&'a Token>> = Vec::with_capacity(5);
     if let Some(i) = closed_index {
         let i = i as isize;
@@ -243,10 +265,7 @@ fn find_neighbors_token<'a>(flatted_tokens: &[&'a Token], index: usize) -> Vec<O
     neighbors
 }
 
-pub fn boundary_tokens<'a>(
-    tokens: &'a [&'a Token],
-    boundary_indices: (usize, usize),
-) -> Vec<&'a Token> {
+pub fn boundary_tokens<'a>(tokens: &'a [&'a Token], boundary_indices: (usize, usize)) -> Vec<&'a Token> {
     tokens
         .iter()
         .filter_map(|token| {
@@ -357,7 +376,7 @@ fn from_number_to_completion_item_kind(kind: u64) -> Option<CompletionItemKind> 
     }
 }
 
-pub(crate) fn from_color_value_to_color_arr(v: &Token) -> Option<Color> {
+fn from_color_value_to_color_arr(v: &Token) -> Option<Color> {
     if let Token::Str(_, color_str) = v {
         return match color_str.as_ref() {
             "white" => Some(Color {
@@ -470,7 +489,7 @@ pub(crate) fn from_color_value_to_color_arr(v: &Token) -> Option<Color> {
                     blue: v3,
                     alpha: 1.0,
                 })
-            }
+            };
         }
     }
     None
@@ -725,7 +744,7 @@ mod tests {
         let cr = cr.expect("cant find closest node");
         let r = r.get_node_by_id(&cr);
         if let Some(v) = r {
-            assert_eq!("remove_button", v.get_value().unwrap().define.name.as_ref());
+            assert_eq!("remove_button", v.get_value().unwrap().define.name.0.as_ref());
         } else {
             panic!()
         }

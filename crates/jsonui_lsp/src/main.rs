@@ -14,7 +14,6 @@ pub(crate) mod tower_lsp {
     pub(crate) use tower_lsp::{async_trait, Client, LanguageServer, LspService, Server};
 }
 
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -108,7 +107,7 @@ impl LanguageServer for Backend {
                     }),
                 }),
                 definition_provider: Some(OneOf::Left(true)),
-                references_provider: Some(OneOf::Left(true)),
+                references_provider: None,
                 workspace: Some(WorkspaceServerCapabilities {
                     workspace_folders: Some(WorkspaceFoldersServerCapabilities {
                         supported:            Some(true),
@@ -166,6 +165,13 @@ impl LanguageServer for Backend {
         let url = &params.text_document.uri;
         trace!("close {}", url);
         self.completer.did_close(url);
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        Ok(self.completer.goto_definition(&params).await)
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
