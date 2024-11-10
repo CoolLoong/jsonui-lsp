@@ -307,7 +307,8 @@ impl<Q, T> Eq for Node<Q, T>
 where
     T: PartialEq + Eq + Clone,
     Q: PartialEq + Eq + Clone,
-{}
+{
+}
 
 impl<Q, T> Display for Node<Q, T>
 where
@@ -316,12 +317,7 @@ where
 {
     /// Display the node.
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        write!(
-            f,
-            "{}: {}",
-            self.get_node_id(),
-            self.get_value().as_ref().cloned().unwrap_or_default()
-        )
+        write!(f, "{}: {}", self.get_node_id(), self.get_value().as_ref().cloned().unwrap_or_default())
     }
 }
 
@@ -347,13 +343,13 @@ where
     T: PartialEq + Eq + Clone,
 {
     /// The user supplied id of the node.
-    node_id: Q,
+    node_id:  Q,
     /// The value of the node.
-    value: Option<T>,
+    value:    Option<T>,
     /// The children of the node.
     children: Vec<Q>,
     /// The parent of the node.
-    parent: Option<Q>,
+    parent:   Option<Q>,
 }
 
 /// An iterator over the nodes in a tree.
@@ -676,7 +672,7 @@ where
     T: PartialEq + Eq + Clone,
 {
     /// Create a nodes list from an iterator.
-    fn from_iter<I: IntoIterator<Item=Node<Q, T>>>(iter: I) -> Self {
+    fn from_iter<I: IntoIterator<Item = Node<Q, T>>>(iter: I) -> Self {
         Nodes(iter.into_iter().collect())
     }
 }

@@ -36,7 +36,7 @@ struct Backend {
     client:               Client,
     log:                  Arc<LoggerHandle>,
     lang:                 Mutex<Arc<str>>,
-    processed_docs: BfastDashMap<Url, i32>,
+    processed_docs:       BfastDashMap<Url, i32>,
     pub(crate) completer: Completer,
 }
 

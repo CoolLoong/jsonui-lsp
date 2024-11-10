@@ -1,15 +1,15 @@
-use std::{ops::Add, thread::sleep};
+use std::ops::Add;
+use std::thread::sleep;
 
 use super::Generator;
-
 
 /// A unique ID generator that generates IDs based on the current epoch time.
 ///
 /// The generator generates IDs based on the current epoch time. This means that the IDs are unique
 /// and sequential. The generator is useful when you want to generate unique IDs for your data. This
-/// generator is however not available in a `no_std` environment since it relies on the `std::time::SystemTime`
-/// to generate the IDs. In no_std environments, you can use the `SimpleGenerator` provided by the `sequential-gen`
-/// crate.
+/// generator is however not available in a `no_std` environment since it relies on the
+/// `std::time::SystemTime` to generate the IDs. In no_std environments, you can use the
+/// `SimpleGenerator` provided by the `sequential-gen` crate.
 ///
 /// # Examples
 ///
@@ -27,7 +27,8 @@ pub struct EpochBasedGenerator;
 impl Generator<u128> for EpochBasedGenerator {
     /// Generates a new unique ID based on the current epoch time.
     ///
-    /// The ID is generated using the current epoch time. This means that the IDs are unique and sequential.
+    /// The ID is generated using the current epoch time. This means that the IDs are unique and
+    /// sequential.
     ///
     /// # Returns
     ///

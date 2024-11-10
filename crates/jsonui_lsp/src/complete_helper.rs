@@ -471,16 +471,16 @@ fn from_color_value_to_color_arr(v: &Token) -> Option<Color> {
                 && v4 <= 1.0
             {
                 Some(Color {
-                    red: v1,
+                    red:   v1,
                     green: v2,
-                    blue: v3,
+                    blue:  v3,
                     alpha: v4,
                 })
             } else {
                 Some(Color {
-                    red: v1,
+                    red:   v1,
                     green: v2,
-                    blue: v3,
+                    blue:  v3,
                     alpha: 1.0,
                 })
             };
@@ -710,7 +710,7 @@ mod tests {
         let r = r.unwrap();
         let r = super::flatten_tokens(&r);
         let index = doc.get_index_from_position(Position {
-            line: 32,
+            line:      32,
             character: 23,
         });
         let boundary = doc.get_boundary_indices(index.unwrap());

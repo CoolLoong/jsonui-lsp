@@ -1,5 +1,6 @@
 use super::*;
-use crate::generator::{unix_epoch::EpochBasedGenerator, Generator};
+use crate::generator::unix_epoch::EpochBasedGenerator;
+use crate::generator::Generator;
 
 pub const GENERATOR: EpochBasedGenerator = EpochBasedGenerator;
 

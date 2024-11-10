@@ -15,8 +15,8 @@ pub enum NodeRemovalStrategy {
     /// parent of the node.
     RetainChildren,
     /// Remove the node and all subsequent children. This means that the node and its children are
-    /// removed from the tree when the node is removed. All the subsequent grand children of the node are
-    /// removed from the tree.
+    /// removed from the tree when the node is removed. All the subsequent grand children of the node
+    /// are removed from the tree.
     RemoveNodeAndChildren,
 }
 
@@ -32,8 +32,8 @@ pub enum TraversalStrategy {
     /// Traverse the tree in post-order. This means that the left child is visited first, then the right
     /// child, and then the root node.
     PostOrder,
-    /// Traverse the tree in in-order. This means that the left child is visited first, then the root node,
-    /// and then the right child.
+    /// Traverse the tree in in-order. This means that the left child is visited first, then the root
+    /// node, and then the right child.
     InOrder,
 }
 
@@ -70,7 +70,7 @@ where
     Q: PartialEq + Eq + Clone,
     T: PartialEq + Eq + Clone,
 {
-    name: Option<String>,
+    name:  Option<String>,
     nodes: Nodes<Q, T>,
 }
 
@@ -96,7 +96,7 @@ where
     /// ```
     pub fn new(tree_name: Option<&str>) -> Self {
         Self {
-            name: tree_name.map(|x| x.to_string()),
+            name:  tree_name.map(|x| x.to_string()),
             nodes: Nodes::default(),
         }
     }
@@ -116,8 +116,8 @@ where
     ///
     /// # Returns
     ///
-    /// The id of the node that was added to the tree. However, if no parent id is provided and the tree already
-    /// has a root node, an error is returned.
+    /// The id of the node that was added to the tree. However, if no parent id is provided and the tree
+    /// already has a root node, an error is returned.
     ///
     /// # Example
     ///
@@ -214,10 +214,7 @@ where
     /// assert_eq!(tree.get_node_by_id(&node_id), Some(node));
     /// ```
     pub fn get_node_by_id(&self, node_id: &Q) -> Option<Node<Q, T>> {
-        self.nodes
-            .iter()
-            .find(|n| &n.get_node_id() == node_id)
-            .cloned()
+        self.nodes.iter().find(|n| &n.get_node_id() == node_id).cloned()
     }
 
     /// Get the root node of the tree.
@@ -242,10 +239,7 @@ where
     /// assert_eq!(tree.get_root_node(), Some(node));
     /// ```
     pub fn get_root_node(&self) -> Option<Node<Q, T>> {
-        self.nodes
-            .iter()
-            .find(|n| n.get_parent_id().is_none())
-            .cloned()
+        self.nodes.iter().find(|n| n.get_parent_id().is_none()).cloned()
     }
 
     /// Get the height of the node.
@@ -302,7 +296,8 @@ where
     ///
     /// # Returns
     ///
-    /// The depth of the node in the tree.  This method returns an error if the node is not found in the tree.
+    /// The depth of the node in the tree.  This method returns an error if the node is not found in the
+    /// tree.
     ///
     /// # Example
     ///
@@ -345,7 +340,8 @@ where
     ///
     /// # Returns
     ///
-    /// The ancestors of the node from closest to furthest.  This method returns an error if the node is not found in the tree.
+    /// The ancestors of the node from closest to furthest.  This method returns an error if the node is
+    /// not found in the tree.
     ///
     /// # Example
     ///
@@ -422,7 +418,8 @@ where
     ///
     /// # Returns
     ///
-    /// The degree of the node in the tree. This method returns an error if the node is not found in the tree.
+    /// The degree of the node in the tree. This method returns an error if the node is not found in the
+    /// tree.
     ///
     /// # Example
     ///
@@ -512,9 +509,9 @@ where
                 let node = self
                     .get_node_by_id(node_id)
                     .ok_or(NodeNotFound(node_id.to_string()))?;
-                let parent_node_id = &node.get_parent_id().ok_or(InvalidOperation(
-                    String::from("Cannot remove root node with RetainChildren strategy"),
-                ))?;
+                let parent_node_id = &node.get_parent_id().ok_or(InvalidOperation(String::from(
+                    "Cannot remove root node with RetainChildren strategy",
+                )))?;
                 let parent_node = self
                     .get_node_by_id(parent_node_id)
                     .ok_or(NodeNotFound(parent_node_id.to_string()))?;
@@ -562,7 +559,8 @@ where
     /// # Arguments
     ///
     /// * `node_id` - The id of the node to get the subsection from.
-    /// * `generations` - The number of descendants to include in the subsection. If `None`, all the descendants of the node are included in the subsection.
+    /// * `generations` - The number of descendants to include in the subsection. If `None`, all the
+    ///   descendants of the node are included in the subsection.
     ///
     /// # Returns
     ///
@@ -591,7 +589,8 @@ where
             .get_node_by_id(node_id)
             .ok_or(NodeNotFound(node_id.to_string()))?;
         subsection.push(node.clone());
-        // Get the subsequent children of the node recursively for the number of generations and add them to the subsection.
+        // Get the subsequent children of the node recursively for the number of generations and add them
+        // to the subsection.
         if let Some(generations) = generations {
             let children = node.get_children_ids();
             for current_generation in 0..generations {
@@ -612,7 +611,7 @@ where
         }
 
         Ok(SubTree {
-            name: Some(node_id.to_string()),
+            name:  Some(node_id.to_string()),
             nodes: subsection,
         })
     }
@@ -856,14 +855,7 @@ where
                     level
                 };
             }
-            Tree::print_tree(
-                tree,
-                f,
-                &child,
-                level + 1,
-                (is_within.0, is_within.1),
-                last_item,
-            )?;
+            Tree::print_tree(tree, f, &child, level + 1, (is_within.0, is_within.1), last_item)?;
         }
         Ok(())
     }
@@ -877,7 +869,7 @@ where
     /// Create a new tree with no nodes.
     fn default() -> Self {
         Tree {
-            name: None,
+            name:  None,
             nodes: Nodes::default(),
         }
     }
@@ -892,11 +884,7 @@ where
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         if let Some(name) = &self.name {
             writeln!(f, "{}", name)?;
-            writeln!(
-                f,
-                "{}",
-                name.clone().chars().map(|_| "*").collect::<String>()
-            )?;
+            writeln!(f, "{}", name.clone().chars().map(|_| "*").collect::<String>())?;
         }
         let node = self.get_root_node().ok_or(FmtError)?;
         Tree::print_tree(self, f, &node, 0, (false, 0), true).map_err(|_| FmtError)?;
@@ -918,8 +906,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::hash::DefaultHasher;
+
+    use super::*;
 
     #[test]
     fn test_tree_new() {
@@ -1057,10 +1046,7 @@ mod tests {
         let tree = Tree::<u32, u32>::new(Some("Sample Tree"));
         let result = tree.get_height();
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err(),
-            InvalidOperation("Tree has no root node".to_string())
-        );
+        assert_eq!(result.unwrap_err(), InvalidOperation("Tree has no root node".to_string()));
     }
 
     #[test]
@@ -1179,9 +1165,7 @@ mod tests {
         let node_id = tree.add_node(Node::new(1, Some(2)), None).unwrap();
         let mut subtree = SubTree::new(Some("Sample Tree"));
         let node_2 = subtree.add_node(Node::new(2, Some(3)), None).unwrap();
-        subtree
-            .add_node(Node::new(3, Some(6)), Some(&node_2))
-            .unwrap();
+        subtree.add_node(Node::new(3, Some(6)), Some(&node_2)).unwrap();
         tree.add_subtree(&node_id, subtree).unwrap();
         assert_eq!(tree.get_nodes().len(), 3);
     }
@@ -1191,9 +1175,7 @@ mod tests {
         let mut tree = Tree::new(Some("Sample Tree"));
         let mut subtree = SubTree::new(Some("Sample Tree"));
         let node_2 = subtree.add_node(Node::new(2, Some(3)), None).unwrap();
-        subtree
-            .add_node(Node::new(3, Some(6)), Some(&node_2))
-            .unwrap();
+        subtree.add_node(Node::new(3, Some(6)), Some(&node_2)).unwrap();
         let result = tree.add_subtree(&1, subtree);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), NodeNotFound("1".to_string()));
@@ -1210,10 +1192,7 @@ mod tests {
         assert_eq!(result.unwrap_err(), NodeNotFound("2".to_string()));
         let result = tree.add_subtree(&node_id, subtree);
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err(),
-            InvalidOperation("Subtree has no root node.".to_string())
-        );
+        assert_eq!(result.unwrap_err(), InvalidOperation("Subtree has no root node.".to_string()));
     }
 
     #[test]
@@ -1224,7 +1203,8 @@ mod tests {
         let node_3 = tree.add_node(Node::new(3, Some(6)), Some(&node_2)).unwrap();
         tree.add_node(Node::new(4, Some(5)), Some(&node_2)).unwrap();
         tree.add_node(Node::new(5, Some(6)), Some(&node_3)).unwrap();
-        let expected_str = "Sample Tree\n***********\n1: 2\n└── 2: 3\n    ├── 3: 6\n    │   └── 5: 6\n    └── 4: 5\n";
+        let expected_str =
+            "Sample Tree\n***********\n1: 2\n└── 2: 3\n    ├── 3: 6\n    │   └── 5: 6\n    └── 4: 5\n";
         assert_eq!(tree.to_string(), expected_str);
     }
 
@@ -1238,18 +1218,10 @@ mod tests {
         tree.add_node(Node::new(5, Some(6)), Some(&node_3)).unwrap();
         let mut tree_2 = Tree::new(Some("Sample Tree"));
         let node_1 = tree_2.add_node(Node::new(1, Some(2)), None).unwrap();
-        let node_2 = tree_2
-            .add_node(Node::new(2, Some(3)), Some(&node_1))
-            .unwrap();
-        let node_3 = tree_2
-            .add_node(Node::new(3, Some(6)), Some(&node_2))
-            .unwrap();
-        tree_2
-            .add_node(Node::new(4, Some(5)), Some(&node_2))
-            .unwrap();
-        tree_2
-            .add_node(Node::new(5, Some(6)), Some(&node_3))
-            .unwrap();
+        let node_2 = tree_2.add_node(Node::new(2, Some(3)), Some(&node_1)).unwrap();
+        let node_3 = tree_2.add_node(Node::new(3, Some(6)), Some(&node_2)).unwrap();
+        tree_2.add_node(Node::new(4, Some(5)), Some(&node_2)).unwrap();
+        tree_2.add_node(Node::new(5, Some(6)), Some(&node_3)).unwrap();
         assert_eq!(tree, tree_2);
         let tree_3 = Tree::new(Some("Sample Tree"));
         assert_ne!(tree, tree_3);
@@ -1272,9 +1244,7 @@ mod tests {
         let expected_in_order = vec![node_4, node_2, node_5, node_1, node_3, node_6];
         assert_eq!(in_order_nodes, expected_in_order);
 
-        let post_order_nodes = tree
-            .traverse(&node_1, TraversalStrategy::PostOrder)
-            .unwrap();
+        let post_order_nodes = tree.traverse(&node_1, TraversalStrategy::PostOrder).unwrap();
         let expected_post_order = vec![node_4, node_5, node_2, node_6, node_3, node_1];
         assert_eq!(post_order_nodes, expected_post_order);
     }
@@ -1290,18 +1260,10 @@ mod tests {
         tree.add_node(Node::new(5, Some(6)), Some(&node_3)).unwrap();
         let mut tree_2 = Tree::new(Some("Sample Tree"));
         let node_1 = tree_2.add_node(Node::new(1, Some(2)), None).unwrap();
-        let node_2 = tree_2
-            .add_node(Node::new(2, Some(3)), Some(&node_1))
-            .unwrap();
-        let node_3 = tree_2
-            .add_node(Node::new(3, Some(6)), Some(&node_2))
-            .unwrap();
-        tree_2
-            .add_node(Node::new(4, Some(5)), Some(&node_2))
-            .unwrap();
-        tree_2
-            .add_node(Node::new(5, Some(6)), Some(&node_3))
-            .unwrap();
+        let node_2 = tree_2.add_node(Node::new(2, Some(3)), Some(&node_1)).unwrap();
+        let node_3 = tree_2.add_node(Node::new(3, Some(6)), Some(&node_2)).unwrap();
+        tree_2.add_node(Node::new(4, Some(5)), Some(&node_2)).unwrap();
+        tree_2.add_node(Node::new(5, Some(6)), Some(&node_3)).unwrap();
         assert_eq!(tree, tree_2);
         let mut hasher = DefaultHasher::new();
         tree.hash(&mut hasher);

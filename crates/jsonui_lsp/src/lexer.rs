@@ -1,7 +1,8 @@
-use lasso::Rodeo;
-use log::trace;
 use std::collections::VecDeque;
 use std::sync::Arc;
+
+use lasso::Rodeo;
+use log::trace;
 
 use crate::document::Document;
 use crate::museair::BfastHashMap;
@@ -9,16 +10,16 @@ use crate::museair::BfastHashMap;
 #[derive(Debug, Clone)]
 
 pub enum TokenChar {
-    Slash = '/' as isize,
-    Escape = '\\' as isize,
-    LeftBrace = '{' as isize,
-    RightBrace = '}' as isize,
-    LeftBracket = '[' as isize,
+    Slash        = '/' as isize,
+    Escape       = '\\' as isize,
+    LeftBrace    = '{' as isize,
+    RightBrace   = '}' as isize,
+    LeftBracket  = '[' as isize,
     RightBracket = ']' as isize,
-    Comma = ',' as isize,
-    Colon = ':' as isize,
-    Quote = '"' as isize,
-    Other = '🤪' as isize,
+    Comma        = ',' as isize,
+    Colon        = ':' as isize,
+    Quote        = '"' as isize,
+    Other        = '🤪' as isize,
 }
 
 impl From<&str> for TokenChar {
@@ -122,14 +123,14 @@ impl std::fmt::Debug for Token {
 }
 
 struct ParseContext<'a> {
-    stack: &'a mut VecDeque<Token>,
-    value: String,
-    l: &'a mut usize,
-    offset: usize,
-    index: &'a mut usize,
-    chars: &'a [Arc<str>],
+    stack:   &'a mut VecDeque<Token>,
+    value:   String,
+    l:       &'a mut usize,
+    offset:  usize,
+    index:   &'a mut usize,
+    chars:   &'a [Arc<str>],
     current: &'a mut ParseState,
-    last: &'a mut ParseState,
+    last:    &'a mut ParseState,
 }
 impl<'a> ParseContext<'a> {
     pub(crate) fn current(&mut self) -> Option<Arc<str>> {

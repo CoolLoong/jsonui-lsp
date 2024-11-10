@@ -161,7 +161,6 @@ mod lib {
     pub use self::core::option::Option;
     pub use self::core::result::Result;
     pub use self::core::slice::Iter;
-
     pub use crate::museair::BfastHashSet;
 
     mod core {
