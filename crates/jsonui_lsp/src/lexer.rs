@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use lasso::Rodeo;
 use log::trace;
 
 use crate::document::Document;

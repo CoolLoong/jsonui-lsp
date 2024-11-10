@@ -1,6 +1,5 @@
 use std::borrow::Borrow;
 use std::fmt::{self, Display};
-use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;

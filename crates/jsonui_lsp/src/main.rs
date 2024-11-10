@@ -14,7 +14,6 @@ pub(crate) mod towerlsp {
 }
 
 use std::path::PathBuf;
-use std::sync::atomic::AtomicU8;
 use std::sync::Arc;
 
 use completer::Completer;
