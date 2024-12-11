@@ -28,7 +28,7 @@ use towerlsp::*;
 use crate::completer::ControlDefine;
 use crate::museair::{BfastHashMap, BfastHashSet};
 
-const VANILLA_PACK_DEFINE: &str = include_str!("resources/vanillapack_define_1.21.40.3.json");
+const VANILLA_PACK_DEFINE: &str = include_str!("resources/vanillapack_define_1.21.50.7.json");
 const JSONUI_DEFINE: &str = include_str!("resources/jsonui_define.json");
 
 struct Backend {
