@@ -469,12 +469,16 @@ impl Completer {
 
             for i in arrays {
                 if let Token::Array(_, vec) = i {
-                    for i in vec.as_ref().unwrap() {
-                        if let Token::Object(_, value) = i {
-                            {
-                                *ctx.control_name.lock() = None;
+                    if let Some(vec) = vec {
+                        for i in vec {
+                            if let Token::Object(_, value) = i {
+                                {
+                                    *ctx.control_name.lock() = None;
+                                }
+                                if let Some(value) = value.as_ref() {
+                                    Self::build_control_tree(value, ctx);
+                                }
                             }
-                            Self::build_control_tree(value.as_ref().unwrap(), ctx);
                         }
                     }
                 }
@@ -505,7 +509,9 @@ impl Completer {
                         *ctx.loc.lock() = *r;
                     }
                     ctx.layer.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    Self::build_control_tree(value.as_ref().unwrap(), ctx);
+                    if let Some(value) = value.as_ref() {
+                        Self::build_control_tree(value, ctx);
+                    }
                     Self::pop_tree(ctx);
                 }
             }
