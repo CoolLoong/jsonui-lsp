@@ -8,17 +8,27 @@ keywords = ["minecraft", "jsonui", "lsp", "vscode", "extension"]
 categories = ["development-tools"]
 
 [dependencies]
-tokio = { version = "1.41.1", features = ["macros", "io-std", "fs", "rt-multi-thread"] }
+tokio = { version = "1.44.2", features = [
+    "macros",
+    "io-std",
+    "fs",
+    "time",
+    "rt-multi-thread",
+] }
 tower-lsp = "0.20.0"
 log = "0.4"
-flexi_logger = "0.29.6"
+flexi_logger = "0.30.1"
 walkdir = "2.3"
-museair = "0.2.0"
+museair = "0.3.0"
 unicode-segmentation = "1.11.0"
 dashmap = "6.1.0"
-thiserror = "2.0.0"
-lasso = { version = "0.7.3", features = ["ahasher"] }
-parking_lot = "0.12.3"
+lasso = { version = "0.7.3", features = ["ahasher", "multi-threaded"] }
+tree-sitter-json = "0.24.8"
+tree-sitter = "0.25.3"
+ropey = "1.6.1"
+multimap = "0.10.0"
+unescape_zero_copy = "2.3.0"
+lru = "0.14.0"
 
 [features]
-debug-parse = []
+debug = []

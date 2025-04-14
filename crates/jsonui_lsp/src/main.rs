@@ -2,74 +2,107 @@
 
 mod complete_helper;
 mod completer;
-mod document;
-mod generator;
-mod lexer;
+mod file_queue;
 mod museair;
-mod tree_ds;
+mod parser;
+mod stringpool;
+mod utils;
 
 pub(crate) mod towerlsp {
     pub(crate) use tower_lsp::lsp_types::*;
     pub(crate) use tower_lsp::{async_trait, Client, LanguageServer, LspService, Server};
 }
 
+use std::collections::HashSet;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use completer::Completer;
-use dashmap::DashMap;
+use file_queue::{CloseFileRequest, CloseFileRequestQueue, OpenFileRequest, OpenFileRequestQueue};
 use flexi_logger::{LogSpecification, Logger, LoggerHandle};
-use lasso::Rodeo;
-use log::{info, set_max_level, trace};
-use museair::{BfastDashMap, BfastHash};
-use parking_lot::Mutex;
+use log::{info, trace};
+use parser::{DocumentParser, Value};
+use stringpool::StringPool;
+use tokio::sync::Mutex as TokioMutex;
 use towerlsp::*;
+use walkdir::WalkDir;
 
-use crate::completer::ControlDefine;
-use crate::museair::{BfastHashMap, BfastHashSet};
+use crate::completer::VanillaControlDefine;
+use crate::museair::BfastHashMap;
 
 const VANILLA_PACK_DEFINE: &str = include_str!("resources/vanillapack_define_1.21.50.7.json");
 const JSONUI_DEFINE: &str = include_str!("resources/jsonui_define.json");
 
+pub(crate) struct Config {
+    log:           Arc<LoggerHandle>,
+    lang:          Arc<str>,
+    append_suffix: bool,
+}
+
+enum GotoDefSequence {
+    Normal            = 0,
+    ExpectFirstOpen   = 1,
+    ExpectSecondClose = 2,
+}
+
+impl GotoDefSequence {
+    fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::ExpectFirstOpen,
+            2 => Self::ExpectSecondClose,
+            _ => Self::Normal,
+        }
+    }
+}
+
 struct Backend {
-    client:               Client,
-    log:                  Arc<LoggerHandle>,
-    lang:                 Mutex<Arc<str>>,
-    processed_docs:       BfastDashMap<Url, i32>,
-    pub(crate) completer: Completer,
+    client:           Client,
+    config:           Arc<TokioMutex<Config>>,
+    completer:        Arc<Completer>,
+    open_queue:       Arc<OpenFileRequestQueue>,
+    close_queue:      Arc<CloseFileRequestQueue>,
+    ignore_semaphore: AtomicU8,
 }
 
 #[async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, param: InitializeParams) -> tower_lsp::jsonrpc::Result<InitializeResult> {
-        let init_config = &param.initialization_options.unwrap();
-        if let Some(v) = init_config
-            .get("settings")
-            .unwrap()
-            .get("log")
-            .unwrap()
-            .get("level")
-        {
-            self.client
-                .log_message(MessageType::INFO, format!("init config level is {}", v))
-                .await;
-            match v.as_str().unwrap() {
-                "off" => {
-                    self.log.set_new_spec(LogSpecification::off());
+        let init_config = param
+            .initialization_options
+            .expect("initialization options cant be empty!");
+        let config = self.config.try_lock();
+        if let Ok(mut config) = config {
+            if let Some(level) = init_config
+                .get("settings")
+                .and_then(|s| s.get("log"))
+                .and_then(|l| l.get("level"))
+                .and_then(|v| v.as_str())
+            {
+                self.client
+                    .log_message(MessageType::INFO, format!("init config level is {}", level))
+                    .await;
+
+                match level {
+                    "off" => config.log.set_new_spec(LogSpecification::off()),
+                    "messages" => config.log.set_new_spec(LogSpecification::error()),
+                    "verbose" => config.log.set_new_spec(LogSpecification::trace()),
+                    _ => (),
                 }
-                "messages" => {
-                    self.log.set_new_spec(LogSpecification::error());
-                }
-                "verbose" => {
-                    self.log.set_new_spec(LogSpecification::trace());
-                }
-                _ => {}
             }
-        }
-        let client_lang = init_config.get("locale").unwrap();
-        trace!("client lang is {:?}", client_lang);
-        {
-            *self.lang.lock() = Arc::from(client_lang.as_str().unwrap());
+            if let Some(append) = init_config
+                .get("settings")
+                .and_then(|s| s.get("options"))
+                .and_then(|o| o.get("auto_append_suffix"))
+                .and_then(|v| v.as_bool())
+            {
+                config.append_suffix = append;
+            }
+            if let Some(lang) = init_config.get("locale").and_then(|l| l.as_str()) {
+                trace!("client lang is {:?}", lang);
+                config.lang = Arc::from(lang);
+            }
         }
 
         if let Some(root_url) = param.root_uri
@@ -95,9 +128,14 @@ impl LanguageServer for Backend {
                 version: None,
             }),
             capabilities: ServerCapabilities {
-                text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::INCREMENTAL,
-                )),
+                text_document_sync: Some(TextDocumentSyncCapability::Options(TextDocumentSyncOptions {
+                    open_close: Some(true),
+                    change: Some(TextDocumentSyncKind::INCREMENTAL),
+                    save: Some(TextDocumentSyncSaveOptions::SaveOptions(SaveOptions {
+                        include_text: Some(true),
+                    })),
+                    ..Default::default()
+                })),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider:           Some(false),
                     trigger_characters:         Some(vec!["\"".to_string(), ":".to_string()]),
@@ -108,7 +146,7 @@ impl LanguageServer for Backend {
                     }),
                 }),
                 definition_provider: Some(OneOf::Left(true)),
-                references_provider: None,
+                references_provider: Some(OneOf::Left(true)),
                 workspace: Some(WorkspaceServerCapabilities {
                     workspace_folders: Some(WorkspaceFoldersServerCapabilities {
                         supported:            Some(true),
@@ -140,6 +178,7 @@ impl LanguageServer for Backend {
 
     async fn initialized(&self, _: InitializedParams) {
         self.client.log_message(MessageType::INFO, "initialized!").await;
+        self.start_file_processor().await;
     }
 
     async fn shutdown(&self) -> tower_lsp::jsonrpc::Result<()> {
@@ -147,41 +186,22 @@ impl LanguageServer for Backend {
         Ok(())
     }
 
-    async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let params = params.text_document;
-        if params.language_id != "json" {
-            return;
-        }
-
-        match self.processed_docs.entry(params.uri.clone()) {
-            dashmap::Entry::Occupied(mut entry) => {
-                let existing_version = entry.get();
-                if *existing_version == params.version {
-                    return;
-                } else {
-                    entry.insert(params.version);
-                }
-            }
-            dashmap::Entry::Vacant(entry) => {
-                entry.insert(params.version);
-            }
-        }
-
-        trace!("did_open {}", &params.uri.path());
-        let arc_content: Arc<str> = Arc::from(params.text.as_str());
-        self.completer.did_open(params.uri, arc_content);
-    }
-
-    async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        let url = &params.text_document.uri;
-        self.completer.update_document(url, &params);
-    }
-
     async fn goto_definition(
         &self,
         params: GotoDefinitionParams,
     ) -> tower_lsp::jsonrpc::Result<Option<GotoDefinitionResponse>> {
-        let r = self.completer.goto_definition(&params);
+        let r = self.completer.goto_definition(params).await;
+        self.ignore_semaphore
+            .store(GotoDefSequence::ExpectFirstOpen as u8, Ordering::SeqCst);
+        Ok(r)
+    }
+
+    async fn references(
+        &self,
+        params: ReferenceParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<Vec<Location>>> {
+        let r = self.completer.references(&params).await;
+        trace!("goto references {:?}", r);
         Ok(r)
     }
 
@@ -189,9 +209,8 @@ impl LanguageServer for Backend {
         &self,
         params: CompletionParams,
     ) -> tower_lsp::jsonrpc::Result<Option<CompletionResponse>> {
-        let url = &params.text_document_position.text_document.uri;
-        let l = self.lang.lock();
-        let r = self.completer.complete(url, l.clone(), &params);
+        let url = params.text_document_position.text_document.uri.clone();
+        let r = self.completer.complete(url, self.config.clone(), &params).await;
         if let Some(r) = r {
             Ok(Some(CompletionResponse::Array(r)))
         } else {
@@ -203,7 +222,7 @@ impl LanguageServer for Backend {
         &self,
         params: DocumentColorParams,
     ) -> tower_lsp::jsonrpc::Result<Vec<ColorInformation>> {
-        let url = &params.text_document.uri;
+        let url = params.text_document.uri;
         let r = self.completer.complete_color(url);
         if let Some(r) = r {
             Ok(r)
@@ -236,21 +255,35 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
-        if let Some(v) = params.settings.get("log").unwrap().get("level") {
-            self.client
-                .log_message(MessageType::INFO, format!("set config level is {}", v))
-                .await;
-            match v.as_str().unwrap() {
-                "off" => {
-                    set_max_level(log::LevelFilter::Off);
+        let config = self.config.try_lock().ok();
+        if let Some(mut config) = config {
+            if let Some(level) = params
+                .settings
+                .get("log")
+                .and_then(|l| l.get("level"))
+                .and_then(|v| v.as_str())
+            {
+                self.client
+                    .log_message(MessageType::INFO, format!("init config level is {}", level))
+                    .await;
+
+                match level {
+                    "off" => config.log.set_new_spec(LogSpecification::off()),
+                    "messages" => config.log.set_new_spec(LogSpecification::error()),
+                    "verbose" => config.log.set_new_spec(LogSpecification::trace()),
+                    _ => (),
                 }
-                "messages" => {
-                    set_max_level(log::LevelFilter::Error);
-                }
-                "verbose" => {
-                    set_max_level(log::LevelFilter::Trace);
-                }
-                _ => {}
+            }
+            if let Some(append) = params
+                .settings
+                .get("options")
+                .and_then(|o| o.get("auto_append_suffix"))
+                .and_then(|v| v.as_bool())
+            {
+                config.append_suffix = append;
+            }
+            if let Some(lang) = params.settings.get("locale").and_then(|l| l.as_str()) {
+                config.lang = Arc::from(lang);
             }
         }
     }
@@ -259,10 +292,17 @@ impl LanguageServer for Backend {
         for i in params.files.iter() {
             if let Ok(url) = Url::parse(&i.uri) {
                 if let Ok(content) = tokio::fs::read_to_string(url.path()).await {
-                    self.completer.did_open(url, Arc::from(content.as_str()));
+                    self.open_queue
+                        .enqueue(OpenFileRequest::Content((url, content)))
+                        .await;
                 }
             }
         }
+    }
+
+    async fn did_change(&self, params: DidChangeTextDocumentParams) {
+        let url = &params.text_document.uri;
+        self.completer.did_change(url.clone(), &params).await;
     }
 
     async fn did_rename_files(&self, params: RenameFilesParams) {
@@ -270,7 +310,50 @@ impl LanguageServer for Backend {
             if let Ok(o_url) = Url::parse(&i.old_uri)
                 && let Ok(n_url) = Url::parse(&i.new_uri)
             {
-                self.completer.did_rename(&o_url, n_url.clone());
+                self.close_queue.remove_close_request(&o_url).await;
+                self.close_queue.remove_close_request(&n_url).await;
+                self.completer.did_rename(o_url, n_url).await;
+            }
+        }
+    }
+
+    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        let params = params.text_document;
+        if params.language_id != "json" {
+            return;
+        }
+        let current_state = GotoDefSequence::from_u8(self.ignore_semaphore.load(Ordering::SeqCst));
+        match current_state {
+            GotoDefSequence::ExpectFirstOpen => {
+                self.ignore_semaphore
+                    .store(GotoDefSequence::ExpectSecondClose as u8, Ordering::SeqCst);
+                trace!("Ignored first open file request after goto_definition!");
+                return;
+            }
+            _ => {
+                trace!("Request open file, url({})", params.uri);
+                self.close_queue.remove_close_request(&params.uri).await;
+                self.open_queue
+                    .enqueue(OpenFileRequest::Content((params.uri, params.text)))
+                    .await;
+            }
+        }
+    }
+
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let current_state = GotoDefSequence::from_u8(self.ignore_semaphore.load(Ordering::SeqCst));
+        match current_state {
+            GotoDefSequence::ExpectSecondClose => {
+                self.ignore_semaphore
+                    .store(GotoDefSequence::Normal as u8, Ordering::SeqCst);
+                trace!("Ignored second close file request after goto_definition!");
+                return;
+            }
+            _ => {
+                trace!("Request close file, url({})", params.text_document.uri);
+                self.close_queue
+                    .enqueue(CloseFileRequest(params.text_document.uri, tokio::time::Instant::now()))
+                    .await
             }
         }
     }
@@ -286,82 +369,120 @@ impl LanguageServer for Backend {
 
 impl Backend {
     async fn init_workspace(&self, workspace_folders: PathBuf) {
-        self.completer.init(&workspace_folders).await;
-    }
-}
+        for entry in WalkDir::new(workspace_folders)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().map_or(false, |ext| ext == "json"))
+        {
+            let abs_path = tokio::fs::canonicalize(&entry.path())
+                .await
+                .expect("Failed to get absolute path");
+            let url = Url::from_file_path(abs_path).expect("Failed to convert path to URL");
 
-pub(crate) fn load_completer() -> Completer {
-    let mut pool = Rodeo::default();
-    let r = lexer::parse_full(VANILLA_PACK_DEFINE);
-    let vanilla_controls_table = match r {
-        Some((_, r)) => {
-            let mut result =
-                BfastHashMap::<(lasso::Spur, lasso::Spur), completer::PooledControlDefine>::default();
-            let m = lexer::to_map(r);
-            for (k1, v) in m {
-                if let lexer::Token::Object(_, v) = v {
-                    let m = lexer::to_map(v.unwrap());
-                    for (k2, v) in m {
-                        if let lexer::Token::Object(_, v) = v {
-                            let m = lexer::to_map(v.unwrap());
-                            let k1_spur = pool.get_or_intern(k1.as_str());
-                            let k2_spur = pool.get_or_intern(k2.as_str());
-                            let tuple = (k1_spur, k2_spur);
-                            let type_spur = if let Some(lexer::Token::Str(_, v)) = m.get("type") {
-                                pool.get_or_intern(v.as_str())
-                            } else {
-                                trace!("cant find type for {:?}", m);
-                                pool.get_or_intern("")
-                            };
-                            let variables = if let Some(v) = m.get("variables")
-                                && let lexer::Token::Array(_, v) = v
-                            {
-                                let mut r = BfastHashSet::default();
-                                for i in v.as_ref().unwrap() {
-                                    if let lexer::Token::Str(_, v) = i {
-                                        r.insert(pool.get_or_intern(v.as_str()));
-                                    }
-                                }
-                                r
-                            } else {
-                                BfastHashSet::default()
-                            };
-                            result.insert(
-                                tuple,
-                                completer::PooledControlDefine {
-                                    name: k2_spur,
-                                    extend: None,
-                                    type_n: Some(type_spur),
-                                    variables,
-                                },
-                            );
+            self.open_queue
+                .enqueue(OpenFileRequest::Path((url, entry.into_path())))
+                .await;
+        }
+    }
+
+    pub async fn start_file_processor(&self) {
+        let open_queue = self.open_queue.clone();
+        let close_queue = self.close_queue.clone();
+        let completer = self.completer.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            loop {
+                let request = open_queue.dequeue().await;
+                match request {
+                    OpenFileRequest::Path((url, path)) => match Self::read_file(&path).await {
+                        Ok(content) => {
+                            completer.did_open(&url, content.as_str()).await;
                         }
+                        Err(e) => {
+                            trace!("Failed to process file request {:?}: {}", url, e);
+                        }
+                    },
+                    OpenFileRequest::Content((url, content)) => {
+                        completer.did_open(&url, content.as_str()).await;
                     }
                 }
             }
-            result
+        });
+        let completer2 = self.completer.clone();
+        tokio::spawn(async move {
+            loop {
+                let request = close_queue.do_clean_close_file().await;
+                completer2.did_close(&request.0);
+            }
+        });
+    }
+
+    async fn read_file(path: &PathBuf) -> Result<String, std::io::Error> {
+        tokio::fs::read_to_string(path).await
+    }
+}
+
+pub(crate) fn load_completer() -> Arc<Completer> {
+    let pool = StringPool::global();
+    let parser = DocumentParser::default(VANILLA_PACK_DEFINE);
+
+    let vanilla_controls_table = {
+        let mut result =
+            BfastHashMap::<(Arc<str>, Arc<str>), completer::VanillaControlDefine>::default();
+        let map = parser.hashmap();
+        for (k1, v1) in map {
+            if let Value::Object(map2) = v1 {
+                for (k2, v2) in map2 {
+                    let k1_spur = Arc::from(k1.as_str());
+                    let k2_spur = Arc::from(k2.as_str());
+                    let tuple = (k1_spur, k2_spur);
+
+                    let spurs = if let Value::Object(map3) = v2 {
+                        let type_spur = if let Some(Value::String(v)) = map3.get("type") {
+                            pool.get_or_intern(v.as_str())
+                        } else {
+                            trace!("cant find type for {:?}.{:?}", k1, k2);
+                            pool.get_or_intern("")
+                        };
+
+                        let variables_spur = if let Some(Value::Array(v)) = map3.get("variables") {
+                            let mut r = HashSet::default();
+                            for i in v.iter().filter_map(|v| {
+                                if let Value::String(s) = v {
+                                    Some(s)
+                                } else {
+                                    None
+                                }
+                            }) {
+                                r.insert(pool.get_or_intern(i.as_str()));
+                            }
+                            r
+                        } else {
+                            trace!("variables is empty for {:?}.{:?}", k1, k2);
+                            HashSet::default()
+                        };
+                        (type_spur, variables_spur)
+                    } else {
+                        trace!("cant find definition for {:?}.{:?}", k1, k2);
+                        (pool.get_or_intern(""), HashSet::default())
+                    };
+                    result.insert(
+                        tuple.clone(),
+                        VanillaControlDefine {
+                            name:      (tuple.0, tuple.1, None),
+                            type_n:    spurs.0,
+                            variables: spurs.1,
+                        },
+                    );
+                }
+            }
         }
-        None => {
-            panic!("error in load vanilla pack definition.")
-        }
+        result
     };
 
-    let resolver: lasso::RodeoResolver = pool.into_resolver();
-
-    let vanilla_controls_table: BfastHashMap<(Arc<str>, Arc<str>), ControlDefine> =
-        vanilla_controls_table
-            .into_iter()
-            .map(|(k, v)| {
-                let (v1, v2) = k;
-                let v = v.to(&resolver);
-                ((Arc::from(resolver.resolve(&v1)), Arc::from(resolver.resolve(&v2))), v)
-            })
-            .collect();
-
-    let jsonui_define = lexer::parse_full(JSONUI_DEFINE).expect("can parse jsonui_define.json");
-    let jsonui_define_map: BfastHashMap<String, lexer::Token> = lexer::to_map(jsonui_define.1);
-
-    Completer::new(vanilla_controls_table, jsonui_define_map)
+    let parser2 = DocumentParser::default(JSONUI_DEFINE);
+    let jsonui_define_map: BfastHashMap<String, parser::Value> = parser2.hashmap();
+    Arc::new(Completer::new(vanilla_controls_table, jsonui_define_map))
 }
 
 #[tokio::main]
@@ -373,10 +494,15 @@ async fn main() {
     let completer = load_completer();
     let (service, socket) = LspService::build(|client| Backend {
         client,
-        log: Arc::new(log),
-        lang: Mutex::new(Arc::from("zh-cn")),
-        processed_docs: DashMap::with_hasher_and_shard_amount(BfastHash::<true>::new(), 2),
+        config: Arc::new(TokioMutex::new(Config {
+            log:           Arc::new(log),
+            lang:          Arc::from("en-us"),
+            append_suffix: true,
+        })),
         completer,
+        open_queue: Arc::new(OpenFileRequestQueue::new()),
+        close_queue: Arc::new(CloseFileRequestQueue::new(Duration::from_secs(3))),
+        ignore_semaphore: AtomicU8::new(0 as u8),
     })
     .finish();
     info!("starting jsonui_lsp...");
@@ -385,8 +511,9 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
+    #[test]
     pub(crate) fn setup_logger() {
-        #[cfg(feature = "debug-parse")]
+        #[cfg(feature = "debug")]
         {
             use flexi_logger::{FileSpec, LogSpecification, Logger, WriteMode};
             Logger::with(LogSpecification::trace())

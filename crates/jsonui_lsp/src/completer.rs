@@ -1,642 +1,1475 @@
-use std::borrow::Borrow;
+use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::fmt::{self, Display};
-use std::path::PathBuf;
-use std::sync::atomic::AtomicUsize;
+use std::hash::Hash;
+use std::ops::Deref;
 use std::sync::Arc;
 use std::vec;
 
 use dashmap::DashMap;
 use lasso::Spur;
 use log::trace;
-use parking_lot::{Mutex, RwLock};
-use walkdir::WalkDir;
+use tokio::sync::Mutex as TokioMutex;
+use tower_lsp::lsp_types;
+use tree_sitter::Node;
 
-use crate::document::Document;
-use crate::lexer::prelude::*;
-use crate::museair::{BfastDashMap, BfastHash, BfastHashMap, BfastHashSet};
+use crate::museair::{BfastDashMap, BfastDashSet, BfastHash, BfastHashMap, BfastMultiMap};
+use crate::parser::prelude::*;
 use crate::towerlsp::*;
-use crate::tree_ds::prelude::*;
+use crate::utils::hash_url;
+use crate::{Config, StringPool};
 
-pub(crate) type AutoTree<T> = Tree<AutomatedId, T>;
-pub(crate) type ControlName = (Arc<str>, Option<(Arc<str>, Arc<str>)>);
+// (namespace, name, extend(namespace, name))
+pub(crate) type ControlId = (Arc<str>, Arc<str>, Option<(Arc<str>, Arc<str>)>);
 
+#[derive(Debug, PartialEq, Clone)]
+pub(crate) enum ColorValue {
+    String(String),
+    Vec(Vec<f64>),
+}
+impl Eq for ColorValue {}
+impl Hash for ColorValue {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            ColorValue::String(v) => v.hash(state),
+            ColorValue::Vec(v) => {
+                for &num in v {
+                    let bits = num.to_bits();
+                    bits.hash(state);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub(crate) struct MetaData {
+    pub(crate) is_declare: bool,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub(crate) struct Color {
+    pub(crate) parent: ControlId,
+    pub(crate) range:  HashRange,
+    pub(crate) value:  ColorValue,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub(crate) struct Control {
+    pub(crate) id:     ControlId,
+    pub(crate) range:  HashRange,
+    pub(crate) parent: Option<ControlId>,
+}
+impl Display for Control {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Control {{ id: {:?}, range: ({:?}), parent: ({:?}) }}",
+            self.id, self.range, self.parent
+        )
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Default)]
+pub(crate) struct Variable {
+    pub(crate) parent: ControlId,
+    pub(crate) range:  HashRange,
+    pub(crate) value:  Arc<str>,
+}
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub(crate) struct ControlNode {
-    pub(crate) define: ControlDefine,
-    pub(crate) loc:    (usize, usize),
-}
-impl Display for ControlNode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ControlNode {{ define: {}, loc: ({}, {}) }}", self.define, self.loc.0, self.loc.1)
-    }
-}
-impl ControlNode {
-    pub(crate) fn get_type(&self) -> Option<String> {
-        if let Some(lock) = self.define.type_n.try_lock() {
-            lock.as_ref().map(|f| f.to_string())
-        } else {
-            None
-        }
-    }
-}
-
-pub(crate) struct PooledControlDefine {
-    pub(crate) name:      Spur,
-    pub(crate) extend:    Option<(Spur, Spur)>,
-    pub(crate) type_n:    Option<Spur>,
-    pub(crate) variables: BfastHashSet<Spur>,
-}
-impl PooledControlDefine {
-    pub(crate) fn to(&self, resolver: &lasso::RodeoResolver) -> ControlDefine {
-        let name = Arc::from(resolver.resolve(&self.name));
-        let extend = if let Some((v1, v2)) = &self.extend {
-            Some((Arc::from(resolver.resolve(v1)), Arc::from(resolver.resolve(v2))))
-        } else {
-            None
-        };
-        let type_n = self.type_n.as_ref().map(|v| Arc::from(resolver.resolve(v)));
-        let variables: BfastHashSet<Arc<str>> = self
-            .variables
-            .iter()
-            .map(|f| Arc::from(resolver.resolve(f)))
-            .collect();
-        ControlDefine {
-            name:      (name, extend),
-            type_n:    Mutex::new(type_n),
-            variables: Mutex::new(variables),
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct ControlDefine {
-    pub(crate) name:      ControlName,
-    pub(crate) type_n:    Mutex<Option<Arc<str>>>,
-    pub(crate) variables: Mutex<BfastHashSet<Arc<str>>>,
-}
-impl Clone for ControlDefine {
-    fn clone(&self) -> Self {
-        ControlDefine {
-            name:      Clone::clone(&self.name),
-            type_n:    Mutex::new(self.type_n.try_lock().expect("cant get type_n lock").clone()),
-            variables: Mutex::new(self.variables.try_lock().expect("cant get type_n lock").clone()),
-        }
-    }
-}
-impl PartialEq for ControlDefine {
-    fn eq(&self, other: &Self) -> bool {
-        if self.name != other.name {
-            return false;
-        }
-        true
-    }
-}
-impl Eq for ControlDefine {}
-impl Display for ControlDefine {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let type_n = self.type_n.try_lock().expect("cant get type_n lock");
-        let variables = self.variables.try_lock().expect("cant get variables lock");
-        let variables_str: String = format!("{:?}", variables);
-        if variables_str.len() > 50 {
-            write!(
-                f,
-                "ControlDefine(name: {}, {:?}, type: {:?}, [{} ...])",
-                self.name.0,
-                self.name.1,
-                *type_n,
-                &variables_str.as_str()[0..50]
-            )
-        } else {
-            write!(
-                f,
-                "ControlDefine(name: {}, {:?}, type: {:?}, [{}])",
-                self.name.0, self.name.1, *type_n, variables_str
-            )
-        }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct BuildTreeContext<'a> {
-    url:          Url,
-    document:     &'a Document,
-    tree:         Mutex<Tree<AutomatedId, ControlNode>>,
-    symbol_table: Mutex<BfastHashMap<ControlNameSymbol, Location>>,
-    control_name: Mutex<Option<Arc<str>>>,
-    last_node:    Mutex<Option<AutomatedId>>,
-    loc:          Mutex<(usize, usize)>,
-    layer:        AtomicUsize,
-}
-
-#[derive(Debug)]
-pub(crate) struct RecursiveSearchContext {
-    type_n:    Mutex<Option<Arc<str>>>,
-    variables: Mutex<BfastHashSet<Arc<str>>>,
-    layer:     AtomicUsize,
-}
-impl RecursiveSearchContext {
-    pub fn new() -> Self {
-        RecursiveSearchContext {
-            type_n:    Mutex::new(None),
-            variables: Mutex::new(BfastHashSet::default()),
-            layer:     AtomicUsize::new(0),
-        }
-    }
+pub(crate) struct VanillaControlDefine {
+    pub(crate) name:      ControlId,
+    pub(crate) type_n:    Spur,
+    pub(crate) variables: HashSet<Spur>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub(crate) struct ControlNameSymbol((Arc<str>, Arc<str>));
-impl ControlNameSymbol {
-    pub(crate) fn new(name: (Arc<str>, Arc<str>)) -> Self {
-        ControlNameSymbol(name)
+pub(crate) enum Symbol {
+    Control(Control),
+    Variable(Variable),
+    Color(Color),
+}
+impl Symbol {
+    pub(crate) fn id(&self) -> ControlId {
+        match self {
+            Symbol::Control(c) => c.id.clone(),
+            Symbol::Variable(c) => c.parent.clone(),
+            Symbol::Color(c) => c.parent.clone(),
+        }
+    }
+
+    pub(crate) fn range(&self) -> HashRange {
+        match self {
+            Symbol::Control(c) => c.range,
+            Symbol::Variable(c) => c.range,
+            Symbol::Color(c) => c.range,
+        }
     }
 }
 
-pub struct Completer {
-    pub(crate) trees:       RwLock<BfastHashMap<Arc<str>, AutoTree<ControlNode>>>,
-    documents:              BfastDashMap<Url, Document>,
-    caches:                 BfastDashMap<Arc<str>, Vec<Token>>,
-    urls:                   BfastDashMap<Arc<str>, Url>,
-    symbol_table:           BfastDashMap<ControlNameSymbol, Location>,
-    vanilla_controls_table: BfastHashMap<(Arc<str>, Arc<str>), ControlDefine>,
-    jsonui_define:          BfastHashMap<String, Token>,
+/// Position in a text document expressed as zero-based line and character offset.
+#[derive(Debug, Eq, PartialEq, Copy, Clone, Default, Hash)]
+pub struct HashPosition {
+    /// Line position in a document (zero-based).
+    pub line: u32,
+
+    /// Character offset on a line in a document (zero-based).
+    pub character: u32,
 }
+impl Into<lsp_types::Position> for HashPosition {
+    fn into(self) -> lsp_types::Position {
+        lsp_types::Position {
+            line:      self.line,
+            character: self.character,
+        }
+    }
+}
+
+/// A range in a text document expressed as (zero-based) start and end positions.
+/// A range is comparable to a selection in an editor. Therefore the end position is exclusive.
+#[derive(Debug, Eq, PartialEq, Copy, Clone, Default, Hash)]
+pub struct HashRange {
+    /// The range's start position.
+    pub start: HashPosition,
+
+    /// The range's end position.
+    pub end: HashPosition,
+}
+impl HashRange {
+    fn contains(&self, other: &HashRange) -> bool {
+        self.start.line <= other.start.line
+            && self.end.line >= other.end.line
+            && self.start.character <= other.start.character
+            && self.end.character >= other.end.character
+    }
+}
+impl PartialOrd for HashRange {
+    fn partial_cmp(&self, other: &HashRange) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for HashRange {
+    fn cmp(&self, other: &HashRange) -> Ordering {
+        let self_size = (self.end.line - self.start.line, self.end.character - self.start.character);
+        let other_size =
+            (other.end.line - other.start.line, other.end.character - other.start.character);
+        self_size.cmp(&other_size)
+    }
+}
+
+impl Into<lsp_types::Range> for HashRange {
+    fn into(self) -> lsp_types::Range {
+        lsp_types::Range {
+            start: self.start.into(),
+            end:   self.end.into(),
+        }
+    }
+}
+
+pub(crate) struct Completer {
+    // hash_url -> DocumentParser
+    parsers:                BfastDashMap<u64, DocumentParser>,
+    // namespace:control_name -> definetion
+    vanilla_controls_table: BfastHashMap<(Arc<str>, Arc<str>), VanillaControlDefine>,
+    jsonui_define:          BfastHashMap<String, Value>,
+    symbol_table:           BfastDashMap<u64, BfastMultiMap<ControlId, Arc<Symbol>>>,
+    definitions:            BfastDashSet<Arc<Symbol>>,
+    references:             BfastDashSet<Arc<Symbol>>,
+    namespace_to_url:       BfastDashMap<Arc<str>, Url>,
+}
+
 impl Completer {
-    pub fn new(
-        vanilla_controls_table: BfastHashMap<(Arc<str>, Arc<str>), ControlDefine>,
-        jsonui_define: BfastHashMap<String, Token>,
+    pub(crate) fn new(
+        vanilla_controls_table: BfastHashMap<(Arc<str>, Arc<str>), VanillaControlDefine>,
+        jsonui_define: BfastHashMap<String, Value>,
     ) -> Self {
         Completer {
-            trees: RwLock::new(BfastHashMap::default()),
-            documents: DashMap::with_hasher_and_shard_amount(BfastHash::<true>::new(), 2),
-            caches: DashMap::with_hasher_and_shard_amount(BfastHash::<true>::new(), 2),
-            urls: DashMap::with_hasher_and_shard_amount(BfastHash::<true>::new(), 2),
-            symbol_table: DashMap::with_hasher_and_shard_amount(BfastHash::<true>::new(), 2),
+            parsers: DashMap::with_hasher_and_shard_amount(BfastHash::<true>::new(), 2),
             vanilla_controls_table,
             jsonui_define,
+            symbol_table: DashMap::with_hasher_and_shard_amount(BfastHash::<true>::new(), 2),
+            definitions: BfastDashSet::default(),
+            references: BfastDashSet::default(),
+            namespace_to_url: DashMap::with_hasher_and_shard_amount(BfastHash::<true>::new(), 2),
         }
     }
 
-    pub(crate) async fn init(&self, workspace_folders: &PathBuf) {
-        for entry in WalkDir::new(workspace_folders)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().map_or(false, |ext| ext == "json"))
-        {
-            if let Ok(content) = tokio::fs::read_to_string(entry.path()).await {
-                let content = Arc::from(content.as_str());
-                let abs_path = tokio::fs::canonicalize(entry.path())
-                    .await
-                    .expect("Failed to get absolute path");
-                let url = Url::from_file_path(abs_path).expect("Failed to convert path to URL");
-                trace!("init url {}", &url);
-                self.did_open(url, content);
-            } else {
-                trace!("Failed to read content {:?}", entry.path());
-            }
-        }
-    }
-
-    pub(crate) fn complete(
+    pub(crate) async fn complete(
         &self,
-        url: &Url,
-        lang: Arc<str>,
-        param: &CompletionParams,
+        url: Url,
+        lang: Arc<TokioMutex<Config>>,
+        params: &CompletionParams,
     ) -> Option<Vec<CompletionItem>> {
-        let doc = self.documents.get(url);
-        if let Some(doc) = doc {
-            if let Some((k, v, tokens, symbols)) = Self::build_tree(url, &doc) {
-                let pos = param.text_document_position.position;
-                let index = doc.get_index_from_position(pos);
-                let index_value;
-                if let Some(index_v) = index {
-                    index_value = index_v;
-                } else {
-                    trace!("cant get_index_from_position {:?}", pos);
-                    return None;
-                }
-
-                let boundary_indices;
-                if let Some(bd) = doc.get_boundary_indices(index_value) {
-                    boundary_indices = bd;
-                } else {
-                    trace!("cant get_boundary_indices {:?}", pos);
-                    return None;
-                }
-
-                let char;
-                {
-                    let input_char_index = index_value - 1;
-                    if let Some(cr) = doc.get_char(input_char_index) {
-                        char = cr;
-                    } else {
-                        return None;
-                    }
-                }
-                let r = crate::complete_helper::normal(
-                    self,
-                    index_value,
-                    boundary_indices,
-                    pos,
-                    char,
-                    lang,
-                    &tokens,
-                    &v,
-                    &self.jsonui_define,
-                );
-
-                self.add_tree(k.clone(), v);
-                self.caches.insert(k, tokens);
-                symbols.into_iter().for_each(|(k, v)| {
-                    self.symbol_table.insert(k, v);
-                });
-                doc.clear_dirty();
-                return r;
-            } else {
-                trace!("Failed to build_tree {:?}", url);
-            }
-        }
-        None
-    }
-
-    pub fn complete_color(&self, url: &Url) -> Option<Vec<ColorInformation>> {
-        let doc = self.documents.get(url);
-        if let Some(doc) = doc {
-            if !doc.is_dirty() {
-                let tokens = self.caches.get(&doc.get_cache_namespace());
-                if let Some(tokens) = tokens {
-                    return crate::complete_helper::color(doc.borrow(), &tokens);
-                }
-            }
-            let input = doc.get_content();
-            let r = parse_full(input.as_ref());
-            if let Some(r) = r {
-                return crate::complete_helper::color(doc.borrow(), &r.1);
-            }
-        }
-        None
-    }
-
-    pub fn goto_definition(&self, params: &GotoDefinitionParams) -> Option<GotoDefinitionResponse> {
-        let param = &params.text_document_position_params;
-        let url = &param.text_document.uri;
-        let pos = &param.position;
-        let doc = self.documents.get(url);
-        if let Some(doc) = doc {
-            let index = doc.get_index_from_position(*pos);
-            let index = index?;
-            let namespace = doc.get_cache_namespace();
-
-            if !doc.is_dirty() {
-                if let Some(v) = self.caches.get(&namespace) {
-                    return crate::complete_helper::goto_definition(self, namespace, &v, index);
-                }
-            }
-
-            if let Some((k, v, tokens, symbols)) = Self::build_tree(url, &doc) {
-                let r = crate::complete_helper::goto_definition(self, k.clone(), &tokens, index);
-                self.add_tree(k.clone(), v);
-                self.caches.insert(k, tokens);
-                symbols.into_iter().for_each(|(k, v)| {
-                    self.symbol_table.insert(k, v);
-                });
-                doc.clear_dirty();
-                return r;
-            }
-        }
-        None
-    }
-
-    pub(crate) fn update_document(&self, url: &Url, param: &DidChangeTextDocumentParams) {
-        let doc = self.documents.get(url);
-        if let Some(doc) = doc {
-            doc.apply_change(param);
-        }
-    }
-
-    pub(crate) fn did_open(&self, url: Url, content: Arc<str>) {
-        let np = Document::get_namespace(content.clone());
-        if let Some(np) = np {
-            let doc = Document::from(content);
-            if let Some((k, v, tokens, symbols)) = Self::build_tree(&url, &doc) {
-                self.documents.insert(url.clone(), doc);
-                self.urls.insert(k.clone(), url);
-                self.add_tree(k.clone(), v);
-                self.caches.insert(k, tokens);
-                symbols.into_iter().for_each(|(k, v)| {
-                    self.symbol_table.insert(k, v);
-                });
-            } else {
-                trace!("Failed to build_tree {:?}", np);
-            }
+        let (lang, append_suffix) = if let Ok(config) = lang.try_lock() {
+            (config.lang.clone(), config.append_suffix)
         } else {
-            trace!("cant find namespace when did_open.")
+            trace!("cant find client lang and settings!");
+            return None;
+        };
+
+        let url = hash_url(&url);
+        let parser_ref = if let Some(parser) = self.parsers.get(&url) {
+            parser
+        } else {
+            trace!("cant find parser for {}!", &url);
+            return None;
+        };
+        let pos = params.text_document_position.position;
+        let node = if let Some(node) = parser_ref.get_node_at_position(pos) {
+            node
+        } else {
+            trace!("cant find node for {:?}", &pos);
+            trace!("{:?}", &parser_ref);
+            return None;
+        };
+        let parents = parser_ref.get_parents(&node);
+        let parent = parser_ref.get_parent_pair_node(&node);
+
+        // Early return for document nodes
+        if parent.kind() == "document" {
+            return None;
+        }
+        let char = params.context.as_ref()?.trigger_character.as_ref()?;
+        let p1 = parents.first()?;
+
+        let (before, after) = parser_ref.get_adjacent_nodes(&node);
+        let [n1, n2] = [before.first(), before.get(1)];
+        let [n3, n4] = [after.first(), after.get(1)];
+        trace!(
+            "|n1 {}| |n2 {}| |current {}| |n3 {}| |n4 {}| |p1 {}| char '{:?}'",
+            n1.map_or("None".to_string(), |f| parser_ref.print_node(f)),
+            n2.map_or("None".to_string(), |f| parser_ref.print_node(f)),
+            parser_ref.print_node(&node),
+            n3.map_or("None".to_string(), |f| parser_ref.print_node(f)),
+            n4.map_or("None".to_string(), |f| parser_ref.print_node(f)),
+            parser_ref.print_node(p1),
+            char
+        );
+        let completion_type = match char.as_str() {
+            "\"" => {
+                if let Some(current_str) = parser_ref.get_string(&node)
+                    && current_str == ""
+                {
+                    if self.is_pair_array(p1) {
+                        if self.is_binding(&parser_ref, &node) {
+                            if n2.map_or(false, |n| n.kind() == ":") {
+                                3 // binding value completion
+                            } else {
+                                1 // binding type completion
+                            }
+                        } else {
+                            trace!("Error 5");
+                            999
+                        }
+                    } else if n2.map_or(false, |n| n.kind() == ":") {
+                        2 // common value completion
+                    } else {
+                        0 // common type completion
+                    }
+                } else {
+                    trace!("Error 6 current_str is {:?}", parser_ref.get_string(&node));
+                    999
+                }
+            }
+            ":" => {
+                if self.is_pair_array(p1) {
+                    if self.is_binding(&parser_ref, &node) {
+                        if n2.map_or(false, |n| self.is_string_node(n)) {
+                            3 // binding value completion
+                        } else {
+                            trace!("Error 4");
+                            999
+                        }
+                    } else {
+                        trace!("Error 3");
+                        999
+                    }
+                } else if n2.map_or(false, |n| self.is_string_node(n)) {
+                    2 // common value completion
+                } else {
+                    trace!("Error 2");
+                    999
+                }
+            }
+            _ => {
+                trace!("Error 1");
+                999
+            }
+        };
+        drop(parser_ref);
+        let input = (completion_type, pos, lang, append_suffix);
+        trace!("completion_type {}", completion_type);
+        None
+        // match completion_type {
+        //     0 => {
+        //         let pos = self.get_position_for_quote(&node);
+        //         self.create_common_type_completion(&parser, pos, parent, lang)
+        //             .await
+        //     }
+        //     1 => self.create_binding_type_completion(&parser, &node, lang),
+        //     2 => {
+        //         let pos = self.get_position_for_quote(&node);
+        //         self.create_value_completion(
+        //             (n1, n2, n3),
+        //             &parser,
+        //             &symbol_table,
+        //             parent,
+        //             pos,
+        //             lang,
+        //             append_suffix,
+        //         )
+        //     }
+        //     3 => self.create_value_completion(
+        //         (n1, n2, n3),
+        //         &parser,
+        //         &symbol_table,
+        //         parent,
+        //         pos,
+        //         lang,
+        //         append_suffix,
+        //     ),
+        //     _ => None,
+        // }
+    }
+
+    pub(crate) fn complete_color(&self, url: Url) -> Option<Vec<ColorInformation>> {
+        let url = hash_url(&url);
+        let symbol_table = self.symbol_table.get(&url)?;
+        let colors: Vec<ColorInformation> = symbol_table
+            .flat_iter()
+            .filter_map(|(_, f)| match f.deref() {
+                Symbol::Color(v) => Some(v),
+                _ => None,
+            })
+            .map(|c| Self::create_color_information(c))
+            .collect();
+        if colors.is_empty() {
+            None
+        } else {
+            Some(colors)
         }
     }
 
-    pub(crate) fn did_rename(&self, o_url: &Url, n_url: Url) {
-        if let Some((_, v)) = self.documents.remove(o_url) {
-            let namespace = &v.get_cache_namespace();
-            self.urls.insert(namespace.clone(), n_url.clone());
-            self.documents.insert(n_url, v);
+    pub(crate) async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Option<GotoDefinitionResponse> {
+        let url = &params.text_document_position_params.text_document.uri;
+        let pos = params.text_document_position_params.position;
+        let hash_url = &hash_url(url);
+        let parser = self.parsers.get(&hash_url)?;
+
+        let node = parser.get_node_at_position(pos);
+        let symbol_table = self.symbol_table.get(hash_url)?;
+        let namespace = parser.namespace();
+        if let Some(node) = node {
+            let range = self.node_range(&node);
+            let mut containing_symbols: Vec<_> = symbol_table
+                .flat_iter()
+                .filter(|f| f.0 .0 == namespace)
+                .filter_map(|f| {
+                    let symbol = f.1;
+                    if symbol.range().contains(&range) {
+                        Some(symbol)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let symbol = if containing_symbols.is_empty() {
+                None
+            } else {
+                containing_symbols.sort_by(|a, b| {
+                    let range1 = a.range();
+                    let range2 = b.range();
+                    range1.cmp(&range2)
+                });
+                Some(containing_symbols[0])
+            }?;
+            trace!("try find_definition");
+            let loc = self.find_definition(symbol).await?;
+            Some(GotoDefinitionResponse::Scalar(loc))
+        } else {
+            None
         }
+    }
+
+    pub(crate) async fn references(&self, params: &ReferenceParams) -> Option<Vec<Location>> {
+        let url = &params.text_document_position.text_document.uri;
+        let pos = params.text_document_position.position;
+        let hash_url = &hash_url(url);
+        let parser = self.parsers.get(hash_url)?;
+        let node = parser.get_node_at_position(pos);
+        let symbol_table = self.symbol_table.get(hash_url)?;
+        let namespace = parser.namespace();
+        if let Some(node) = node {
+            let range = self.node_range(&node);
+            let mut containing_symbols: Vec<_> = symbol_table
+                .flat_iter()
+                .filter(|f| f.0 .0 == namespace)
+                .filter_map(|f| {
+                    let symbol = f.1;
+                    if symbol.range().contains(&range) {
+                        Some(symbol)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let symbol = if containing_symbols.is_empty() {
+                None
+            } else {
+                containing_symbols.sort_by(|a, b| {
+                    let range1 = a.range();
+                    let range2 = b.range();
+                    range1.cmp(&range2)
+                });
+                Some(containing_symbols[0])
+            }?;
+            return Some(self.find_references(symbol));
+        }
+        None
+    }
+
+    pub(crate) async fn did_change(&self, url: Url, params: &DidChangeTextDocumentParams) {
+        let hash_url = hash_url(&url);
+        let parser = self.parsers.get_mut(&hash_url);
+        if let Some(mut parser) = parser {
+            let changes = &params.content_changes;
+            for change in changes {
+                parser.edit(change);
+            }
+            self.index_document(&parser);
+        }
+    }
+
+    pub(crate) async fn did_open(&self, url: &Url, content: &str) {
+        let hash_url = hash_url(url);
+        trace!("hash url is {}", hash_url);
+        let parser = self.parsers.entry(hash_url).or_insert_with(|| {
+            trace!("Init parser, url({}) hash_url({})", url, hash_url);
+            DocumentParser::new(hash_url, &content)
+        });
+        trace!("parser is {:?}", parser);
+        self.namespace_to_url
+            .entry(parser.namespace())
+            .or_insert(url.clone());
+        self.index_document(&parser);
     }
 
     pub(crate) fn did_close(&self, url: &Url) {
-        let r = self.documents.remove(url);
-        if let Some((_, v)) = r {
-            let namespace = &v.get_cache_namespace();
-            self.urls.remove(namespace);
-            self.caches.remove(namespace);
-            self.del_tree(namespace);
-        }
-    }
-
-    pub(crate) fn get_url(&self, namespace: &Arc<str>) -> Option<Url> {
-        let r = self.urls.get(namespace);
-        r.map(|r| r.clone())
-    }
-
-    pub(crate) fn get_namespace(&self, url: &Url) -> Option<Arc<str>> {
-        let r = self.documents.get(url);
-        r.map(|r| r.get_cache_namespace())
-    }
-
-    pub(crate) fn find_symbol(&self, key: &ControlNameSymbol) -> Option<Location> {
-        self.symbol_table.get(key).map(|f| f.clone())
-    }
-
-    pub(crate) fn contain_tree(&self, name: &str) -> bool {
-        self.trees.read().contains_key(name)
-    }
-
-    pub(crate) fn add_tree(&self, k: Arc<str>, v: Tree<AutomatedId, ControlNode>) {
-        self.trees.write().insert(k, v);
-    }
-
-    pub(crate) fn del_tree(&self, k: &str) {
-        self.trees.write().remove(k);
-    }
-
-    fn build_tree(
-        url: &Url,
-        document: &Document,
-    ) -> Option<(
-        Arc<str>,
-        Tree<AutomatedId, ControlNode>,
-        Vec<Token>,
-        BfastHashMap<ControlNameSymbol, Location>,
-    )> {
-        let input = document.get_content();
-        let r = parse_full(input.as_ref());
-        match r {
-            Some((range, tokens)) => {
-                let np = document.get_cache_namespace();
-                let tr: Tree<AutomatedId, ControlNode> = AutoTree::<ControlNode>::new(Some(np.as_ref()));
-                let ctx = BuildTreeContext {
-                    url: url.clone(),
-                    document,
-                    tree: Mutex::new(tr),
-                    symbol_table: Mutex::new(BfastHashMap::default()),
-                    control_name: Mutex::new(None),
-                    last_node: Mutex::new(None),
-                    loc: Mutex::new((0, 0)),
-                    layer: AtomicUsize::new(0),
-                };
-                let root = ControlNode {
-                    define: ControlDefine {
-                        name:      (Arc::from("root"), None),
-                        type_n:    Mutex::new(None),
-                        variables: Mutex::new(BfastHashSet::default()),
-                    },
-                    loc:    range,
-                };
-                Self::add_tree_node(&ctx, root, None);
-                Self::build_control_tree(&tokens, &ctx);
-                Some((np, ctx.tree.into_inner(), tokens, ctx.symbol_table.into_inner()))
+        let hash_url = hash_url(url);
+        trace!("Close parser, url({}) hash_url({})", url, hash_url);
+        match self.parsers.remove(&hash_url) {
+            Some((key, parser)) => {
+                if let Some((_, mut symbol_table)) = self.symbol_table.remove(&key) {
+                    let definitions = &self.definitions;
+                    let references = &self.references;
+                    symbol_table.flat_iter().for_each(|f| {
+                        definitions.remove(f.1);
+                        references.remove(f.1);
+                    });
+                    symbol_table.clear();
+                }
+                drop(parser);
             }
             None => {
-                trace!("error in new parser");
-                None
+                trace!("Failed to acquire parser lock for {:?}, skipping cleanup", url);
             }
         }
     }
 
-    fn build_control_tree<'a>(tokens: &'a Vec<Token>, ctx: &'a BuildTreeContext) {
-        // recursion layer check
-        let layer = ctx.layer.load(std::sync::atomic::Ordering::SeqCst);
-        if layer > 100 {
-            panic!("too deep layer {} for build_control_tree, more than 100", layer);
-        }
-
-        let m = to_map_with_span_ref(tokens);
-        let v = { ctx.control_name.lock().take() };
-        let np = ctx.document.get_cache_namespace();
-        if let Some(v) = v {
-            let (name, extend) = split_control_name(v.as_ref(), np.as_ref());
-            let mut type_n = None;
-            let mut variables = BfastHashSet::default();
-            let mut arrays = vec![];
-
-            for ((_, k), v) in m {
-                if matches!(v, Token::Array(_, _)) {
-                    arrays.push(v);
-                }
-                if k == "type" {
-                    type_n = Some(to_string_ref(v));
-                } else if k.starts_with("$") {
-                    let str = k.replace("|default", "");
-                    let var: Arc<str> = Arc::from(str.as_str());
-                    variables.insert(var.clone());
-                }
+    pub(crate) async fn did_rename(&self, o_url: Url, new_url: Url) {
+        let o_url = hash_url(&o_url);
+        let n_url = hash_url(&new_url);
+        if let Some((_, mut parser)) = self.parsers.remove(&o_url) {
+            // update namespace_to_url
+            if let Some((k, _)) = self.namespace_to_url.remove(&parser.namespace()) {
+                self.namespace_to_url.insert(k, new_url);
             }
+            parser.url = n_url;
+            self.parsers.insert(n_url, parser);
+        }
+        if let Some((_, symbols)) = self.symbol_table.remove(&o_url) {
+            self.symbol_table.insert(n_url, symbols);
+        }
+    }
 
-            let type_n = type_n.map(|f| Arc::from(f.as_str()));
+    async fn find_definition(&self, symbol: &Symbol) -> Option<Location> {
+        match symbol {
+            Symbol::Control(c) => {
+                let extend = c.id.2.clone()?;
+                let url = self.namespace_to_url.get(&extend.0)?;
+                self.get_or_create_parser(&url, |_| {}).await;
 
-            let loc = { *ctx.loc.lock() };
-            let node = ControlNode {
-                define: ControlDefine {
-                    name:      (name, extend),
-                    type_n:    Mutex::new(type_n),
-                    variables: Mutex::new(variables),
+                self.definitions
+                    .iter()
+                    .filter_map(|f| {
+                        let target = f.id();
+                        if target.0 == extend.0 && target.1 == extend.1 {
+                            let url = self.get_url(target.0);
+                            if let Some(url) = url {
+                                Some(Location {
+                                    uri:   url,
+                                    range: f.range().into(),
+                                })
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .last()
+            }
+            _ => None,
+        }
+    }
+
+    fn find_references(&self, symbol: &Symbol) -> Vec<Location> {
+        match symbol {
+            Symbol::Control(c) => {
+                let namespace = c.id.0.clone();
+                let control_name = c.id.1.clone();
+                self.references
+                    .iter()
+                    .filter_map(|f| {
+                        let target = f.id();
+                        if let Some(extend) = target.2 {
+                            if extend.0 == namespace && extend.1 == control_name {
+                                let url = self.get_url(target.0);
+                                if let Some(url) = url {
+                                    Some(Location {
+                                        uri:   url,
+                                        range: f.range().into(),
+                                    })
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            }
+            _ => vec![],
+        }
+    }
+
+    fn get_url(&self, spur: Arc<str>) -> Option<Url> {
+        let r = self.namespace_to_url.get(&spur)?;
+        Some(r.clone())
+    }
+
+    fn get_position_for_quote(&self, node: &Node) -> Position {
+        let pos = self.node_range(node);
+        Position {
+            line:      pos.start.line,
+            character: (pos.start.character + pos.end.character) / 2,
+        }
+    }
+
+    fn create_color_information(color: &Color) -> ColorInformation {
+        match &color.value {
+            ColorValue::String(v) => match v.as_str() {
+                "white" => ColorInformation {
+                    range: color.range.into(),
+                    color: lsp_types::Color {
+                        red:   1.0,
+                        green: 1.0,
+                        blue:  1.0,
+                        alpha: 1.0,
+                    },
                 },
-                loc,
-            };
-
-            let option = { ctx.last_node.lock().take() };
-            let option = option.as_ref();
-            Self::add_tree_node(ctx, node, option);
-
-            for i in arrays {
-                if let Token::Array(_, vec) = i {
-                    if let Some(vec) = vec {
-                        for i in vec {
-                            if let Token::Object(_, value) = i {
-                                {
-                                    *ctx.control_name.lock() = None;
-                                }
-                                if let Some(value) = value.as_ref() {
-                                    Self::build_control_tree(value, ctx);
-                                }
-                            }
-                        }
+                "silver" => ColorInformation {
+                    range: color.range.into(),
+                    color: lsp_types::Color {
+                        red:   0.776,
+                        green: 0.776,
+                        blue:  0.776,
+                        alpha: 1.0,
+                    },
+                },
+                "gray grey" => ColorInformation {
+                    range: color.range.into(),
+                    color: lsp_types::Color {
+                        red:   0.333,
+                        green: 0.333,
+                        blue:  0.333,
+                        alpha: 1.0,
+                    },
+                },
+                "black" => ColorInformation {
+                    range: color.range.into(),
+                    color: lsp_types::Color {
+                        red:   0.0,
+                        green: 0.0,
+                        blue:  0.0,
+                        alpha: 1.0,
+                    },
+                },
+                "red" => ColorInformation {
+                    range: color.range.into(),
+                    color: lsp_types::Color {
+                        red:   1.0,
+                        green: 0.333,
+                        blue:  0.333,
+                        alpha: 1.0,
+                    },
+                },
+                "green" => ColorInformation {
+                    range: color.range.into(),
+                    color: lsp_types::Color {
+                        red:   0.333,
+                        green: 1.0,
+                        blue:  0.333,
+                        alpha: 1.0,
+                    },
+                },
+                "yellow" => ColorInformation {
+                    range: color.range.into(),
+                    color: lsp_types::Color {
+                        red:   1.0,
+                        green: 1.0,
+                        blue:  0.333,
+                        alpha: 1.0,
+                    },
+                },
+                "brown" => ColorInformation {
+                    range: color.range.into(),
+                    color: lsp_types::Color {
+                        red:   0.706,
+                        green: 0.408,
+                        blue:  0.302,
+                        alpha: 1.0,
+                    },
+                },
+                "cyan" => ColorInformation {
+                    range: color.range.into(),
+                    color: lsp_types::Color {
+                        red:   0.0,
+                        green: 0.667,
+                        blue:  0.667,
+                        alpha: 1.0,
+                    },
+                },
+                "blue" => ColorInformation {
+                    range: color.range.into(),
+                    color: lsp_types::Color {
+                        red:   0.333,
+                        green: 0.333,
+                        blue:  1.0,
+                        alpha: 1.0,
+                    },
+                },
+                "orange" => ColorInformation {
+                    range: color.range.into(),
+                    color: lsp_types::Color {
+                        red:   1.0,
+                        green: 0.667,
+                        blue:  0.0,
+                        alpha: 1.0,
+                    },
+                },
+                "purple" => ColorInformation {
+                    range: color.range.into(),
+                    color: lsp_types::Color {
+                        red:   1.0,
+                        green: 0.333,
+                        blue:  1.0,
+                        alpha: 1.0,
+                    },
+                },
+                "nil" | _ => ColorInformation {
+                    range: color.range.into(),
+                    color: lsp_types::Color {
+                        red:   1.0,
+                        green: 1.0,
+                        blue:  1.0,
+                        alpha: 0.0,
+                    },
+                },
+            },
+            ColorValue::Vec(v) => {
+                if v.len() == 3 {
+                    ColorInformation {
+                        range: color.range.into(),
+                        color: lsp_types::Color {
+                            red:   f32::clamp(v[0] as f32, 0 as f32, 1 as f32),
+                            green: f32::clamp(v[1] as f32, 0 as f32, 1 as f32),
+                            blue:  f32::clamp(v[2] as f32, 0 as f32, 1 as f32),
+                            alpha: 1.0,
+                        },
                     }
-                }
-            }
-            {
-                *ctx.control_name.lock() = None;
-            }
-        } else {
-            for ((range, k), v) in m {
-                if let Token::Object(r, value) = v {
-                    // ControlName Symbol build
-                    if layer == 0 {
-                        let pos_l = { ctx.document.get_position_from_index(range.0) };
-                        let pos_r = { ctx.document.get_position_from_index(range.1) };
-                        if let (Some(pos_l), Some(pos_r)) = (pos_l, pos_r) {
-                            let name = split_control_name(k.as_ref(), np.as_ref());
-                            let symbol_key = ControlNameSymbol::new((np.clone(), name.0));
-                            {
-                                let location = Location::new(ctx.url.clone(), Range::new(pos_l, pos_r));
-                                ctx.symbol_table.lock().insert(symbol_key, location);
-                            }
-                        }
+                } else if v.len() == 4 {
+                    ColorInformation {
+                        range: color.range.into(),
+                        color: lsp_types::Color {
+                            red:   f32::clamp(v[0] as f32, 0 as f32, 1 as f32),
+                            green: f32::clamp(v[1] as f32, 0 as f32, 1 as f32),
+                            blue:  f32::clamp(v[2] as f32, 0 as f32, 1 as f32),
+                            alpha: f32::clamp(v[3] as f32, 0 as f32, 1 as f32),
+                        },
                     }
-                    {
-                        *ctx.control_name.lock() = Some(Arc::from(k));
+                } else {
+                    ColorInformation {
+                        range: color.range.into(),
+                        color: lsp_types::Color {
+                            red:   1.0,
+                            green: 1.0,
+                            blue:  1.0,
+                            alpha: 0.0,
+                        },
                     }
-                    {
-                        *ctx.loc.lock() = *r;
-                    }
-                    ctx.layer.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                    if let Some(value) = value.as_ref() {
-                        Self::build_control_tree(value, ctx);
-                    }
-                    Self::pop_tree(ctx);
                 }
             }
         }
     }
 
-    fn recursive_search(&self, extend: &(Arc<str>, Arc<str>), ctx: &RecursiveSearchContext) {
-        let layer = ctx.layer.load(std::sync::atomic::Ordering::Acquire);
-        if layer > 100 {
-            panic!("too deep recursive layer {}, more than 100", layer);
+    fn is_string_node(&self, node: &Node) -> bool {
+        matches!(node.kind(), STRING | STRING_CONTENT)
+    }
+
+    fn is_pair_array(&self, node: &Node) -> bool {
+        node.named_children(&mut node.walk())
+            .any(|node| node.kind() == ARRAY)
+    }
+
+    fn is_binding(&self, parser: &DocumentParser, node: &Node) -> bool {
+        let mut current = node.parent();
+        while let Some(parent) = current {
+            if !matches!(parent.kind(), "ERROR" | "pair") {
+                current = Some(parent);
+                break;
+            }
+            current = parent.parent();
         }
-        let parent = {
-            let trees = self.trees.read();
-            trees.get(&extend.0).cloned()
+        current
+            .and_then(|p| Some(p))
+            .and_then(|parent| (matches!(parent.kind(), OBJECT)).then(|| parent))
+            .and_then(|parent| parent.parent())
+            .and_then(|pp| (pp.kind() == ARRAY).then(|| pp))
+            .and_then(|pp| pp.parent())
+            .and_then(|ppp| (ppp.kind() == "pair").then(|| ppp))
+            .and_then(|ppp| ppp.named_child(0))
+            .filter(|key| self.is_string_node(key))
+            .and_then(|key| parser.string(key))
+            .map_or(false, |key| key == "bindings")
+    }
+
+    // Helper to extract string values from JSON array
+    fn extract_strings(value: Option<&Value>) -> Vec<String> {
+        value
+            .and_then(|value| Some(to_array_ref(value)))
+            .map(|v| v.into_iter().filter_map(|v| Some(to_string(v))).collect())
+            .unwrap_or_default()
+    }
+
+    // for key completion, there are three types:
+    // - common key
+    // - specific type key
+    // - variables key
+    async fn create_common_type_completion<'a>(
+        &self,
+        parser: &DocumentParser,
+        pos: Position,
+        parent: Node<'a>,
+        lang: Arc<str>,
+    ) -> Option<Vec<CompletionItem>> {
+        let common_key = Self::extract_strings(self.jsonui_define.get("common"));
+        // if not root node
+        let type_key = {
+            let key = parent.named_child(0).unwrap();
+            let value = parent.named_child(1).unwrap();
+            let type_n = parser.field(value, "type");
+
+            let control_id = parser.string(key).unwrap();
+            let control_id = split_control_name(control_id, parser.namespace());
+            if let Some(control_id) = control_id {
+                let type_n = if let Some(type_n) = type_n {
+                    Some(parser.string(type_n).unwrap())
+                } else {
+                    if let Some(control_id) = control_id.2 {
+                        self.find_control_type(control_id).await
+                    } else {
+                        None
+                    }
+                };
+                let type_key = if let Some(type_n) = type_n {
+                    Self::extract_strings(self.jsonui_define.get(type_n.as_str()))
+                } else {
+                    Vec::with_capacity(0)
+                };
+                type_key
+            } else {
+                Vec::with_capacity(0)
+            }
         };
-        if let Some(tr) = parent {
-            let root = tr.get_root_node().unwrap();
-            for i in root.get_children_ids() {
-                let n = tr.get_node_by_id(&i).unwrap();
-                let v = n.get_value().unwrap();
-                if v.define.name.0 != extend.1 {
+
+        let mut result = Vec::with_capacity(type_key.len() + common_key.len());
+        let mut order = 0 as usize;
+        common_key.into_iter().for_each(|k| {
+            result.push(self.create_simple_completion_item(k, lang.clone(), pos, order));
+            order += 1;
+        });
+        type_key.into_iter().for_each(|k| {
+            result.push(self.create_simple_completion_item(k, lang.clone(), pos, order));
+            order += 1;
+        });
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
+    }
+
+    fn create_binding_type_completion(
+        &self,
+        parser: &DocumentParser,
+        current: &Node,
+        lang: Arc<str>,
+    ) -> Option<Vec<CompletionItem>> {
+        let pos = self.get_position_for_quote(current);
+        let common_key = Self::extract_strings(self.jsonui_define.get("bindings_properties"));
+        // if not root node
+        let type_key = {
+            let type_n = self
+                .find_binding_type(parser, current)
+                .unwrap_or("global".to_string());
+            Self::extract_strings(self.jsonui_define.get(type_n.as_str()))
+        };
+        let mut result = Vec::with_capacity(type_key.len() + common_key.len());
+        let mut order = 0 as usize;
+        common_key.into_iter().for_each(|k| {
+            result.push(self.create_simple_completion_item(k, lang.clone(), pos, order));
+            order += 1;
+        });
+        type_key.into_iter().for_each(|k| {
+            result.push(self.create_simple_completion_item(k, lang.clone(), pos, order));
+            order += 1;
+        });
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
+    }
+
+    // for value completion, there are two types:
+    // - specific type value options
+    // - variables reference
+    fn create_value_completion(
+        &self,
+        nodes: (Option<&Node>, Option<&Node>, Option<&Node>),
+        parser: &DocumentParser,
+        symbol_table: &BfastMultiMap<ControlId, Arc<Symbol>>,
+        parent: Node,
+        pos: Position,
+        lang: Arc<str>,
+        append_suffix: bool,
+    ) -> Option<Vec<CompletionItem>> {
+        let (n1, n2, n3) = nodes;
+
+        // Determine current key
+        let current_is_colon = n2.map_or(false, |n| n.kind() != ":");
+        let key_node = if current_is_colon { n2 } else { n1 };
+        let key = key_node.and_then(|n| parser.get_string(n)).unwrap_or_default();
+
+        // Get completion values from JSON definition
+        let Some(values_def) = self.jsonui_define.get(&key) else {
+            return None;
+        };
+
+        // Process suffix
+        let suffix = if append_suffix {
+            n3.filter(|n| n.kind() == ",")
+                .is_none()
+                .then_some(",")
+                .unwrap_or("")
+        } else {
+            ""
+        };
+
+        // Get base values
+        let mut values = to_object_ref(values_def)
+            .and_then(|obj| obj.get("values"))
+            .map(to_array_ref)
+            .unwrap_or_default();
+
+        // Add variables
+        if let Some(key) = parent.named_child(0) {
+            if let Some(control_name) = parser.string(key) {
+                let control_id = split_control_name(control_name, parser.namespace());
+                if let Some(control_id) = control_id {
+                    let mut variables = Vec::new();
+                    self.find_variable_key(&mut variables, symbol_table, &control_id);
+                    values.extend(variables.into_iter().map(Value::String));
+                }
+            }
+        }
+
+        // Process completions
+        let completions = values
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, v)| {
+                let (insert_text_str, label, description, format, kind) = match v {
+                    Value::Object(ref v) => (
+                        v.get("insert_text").and_then(|v| Some(to_string_ref(v))),
+                        v.get("label").and_then(|v| Some(to_string_ref(v))),
+                        v.get("description")
+                            .and_then(|desc| to_object_ref(desc))
+                            .and_then(|desc| desc.get(lang.as_ref()).or(desc.get("en-us")))
+                            .and_then(|v| Some(to_string_ref(v)))
+                            .or(Some("jsonui-support")),
+                        v.get("insert_text_format").and_then(|k| {
+                            Self::from_number_to_insert_text_format(to_number_ref(k) as u64)
+                        }),
+                        v.get("kind").and_then(|k| {
+                            Self::from_number_to_completion_item_kind(to_number_ref(k) as u64)
+                        }),
+                    ),
+                    Value::String(ref s) => {
+                        (Some(s.as_str()), Some(s.as_str()), Some("jsonui-support"), None, None)
+                    }
+                    _ => return None,
+                };
+
+                // Skip specific formats if not after colon
+                if !current_is_colon
+                    && matches!(format, Some(f) if
+                        (f == InsertTextFormat::PLAIN_TEXT && kind.is_some()) ||
+                        f == InsertTextFormat::SNIPPET
+                    )
+                {
+                    return None;
+                }
+
+                // Prepare text edits
+                let needs_quotes = current_is_colon && format.is_none();
+                let (insert_text, text_edit) = if current_is_colon {
+                    let text = insert_text_str.or(label).map(|t| {
+                        if needs_quotes {
+                            format!(" \"{t}\"{suffix}")
+                        } else {
+                            format!(" {t}{suffix}")
+                        }
+                    });
+                    (text, None)
+                } else if kind.is_none() {
+                    let text = insert_text_str.or(label).map(|t| t.to_string());
+                    let edit = text.as_ref().map(|t| {
+                        CompletionTextEdit::Edit(TextEdit {
+                            range:    Range {
+                                start: pos,
+                                end:   Position {
+                                    line:      pos.line,
+                                    character: pos.character + 1,
+                                },
+                            },
+                            new_text: format!("{t}\"{suffix}"),
+                        })
+                    });
+                    (text, edit)
+                } else {
+                    (None, None)
+                };
+                Some(CompletionItem {
+                    label: label.unwrap_or("unknown").to_string(),
+                    label_details: Some(CompletionItemLabelDetails {
+                        description: description.map(str::to_string),
+                        detail:      None,
+                    }),
+                    kind,
+                    insert_text_format: format,
+                    insert_text,
+                    text_edit,
+                    preselect: Some(true),
+                    sort_text: Some(Self::number_to_sort_text(i, 4)),
+                    ..Default::default()
+                })
+            })
+            .collect::<Vec<_>>();
+
+        (!completions.is_empty()).then_some(completions)
+    }
+
+    fn find_binding_type(&self, parser: &DocumentParser, node: &Node) -> Option<String> {
+        let mut current = node.parent();
+        while let Some(parent) = current {
+            if !matches!(parent.kind(), "ERROR" | "pair") {
+                current = Some(parent);
+                break;
+            }
+            current = parent.parent();
+        }
+        let current = current?;
+        current
+            .named_children(&mut current.walk())
+            .filter(|child| child.kind() == "pair")
+            .find_map(|pair| {
+                pair.named_child(0)
+                    .filter(|key| self.is_string_node(key))
+                    .and_then(|key| parser.string(key))
+                    .and_then(|key| {
+                        (key == "binding_type")
+                            .then(|| pair.named_child(1).and_then(|val| parser.string(val)))
+                    })
+                    .flatten()
+            })
+    }
+
+    async fn find_control_type(&self, control_id: (Arc<str>, Arc<str>)) -> Option<String> {
+        let pool = StringPool::global();
+        let mut stack = vec![];
+        let mut control_id = control_id;
+        loop {
+            // check type in vanilla_controls_table
+            if let Some(v) = self.vanilla_controls_table.get(&control_id) {
+                return Some(pool.resolve(&v.type_n).to_string());
+            }
+            // get all kvs for the control of namespace
+            let kvs = self.get_all_kv(&control_id).await?;
+            let namespace = control_id.0.clone();
+            let control_name = control_id.1.clone();
+            // try get type from kvs from control_name directly
+            if let Some(type_n) = Self::try_get_type_directly(&kvs, control_name.clone()) {
+                return Some(type_n);
+            }
+            // get type foreach kvs
+            match Self::find_type_or_extend(kvs, namespace, control_name) {
+                Ok(type_) => return Some(type_),
+                Err(Some(extend)) => {
+                    stack.push(control_id);
+                    control_id = extend;
                     continue;
                 }
-                {
-                    let type_n = v.define.type_n.lock();
-                    let mut ctx_type_n = ctx.type_n.lock();
-                    if ctx_type_n.borrow().is_none() && type_n.is_some() {
-                        *ctx_type_n = type_n.clone();
+                Err(None) => {}
+            }
+            control_id = stack.pop()?;
+        }
+    }
+
+    async fn get_all_kv(&self, refer: &(Arc<str>, Arc<str>)) -> Option<BfastHashMap<String, Value>> {
+        let url = &self.namespace_to_url.get(&refer.0)?.clone();
+        self.get_or_create_parser(url, |parser| {
+            let json_def = parser.hashmap();
+            Some(json_def)
+        })
+        .await?
+    }
+
+    async fn get_or_create_parser<F, R>(&self, url: &Url, f: F) -> Option<R>
+    where
+        F: FnOnce(&DocumentParser) -> R,
+    {
+        let hash_url = hash_url(url);
+        trace!("try get parser url({}) hash_url({})", url, hash_url);
+        if let Some(parser) = self.parsers.get(&hash_url) {
+            let result = f(parser.value());
+            return Some(result);
+        }
+
+        trace!("try create parser");
+        let path = match url.to_file_path() {
+            Ok(p) => p,
+            Err(_) => {
+                trace!("Failed to convert URL to file path: {}", url);
+                // 如果需要更详细的信息，你可以检查URL的格式
+                trace!("URL scheme: {}, host: {:?}, path: {}", url.scheme(), url.host(), url.path());
+                return None;
+            }
+        };
+
+        let content = match tokio::fs::read_to_string(&path).await {
+            Ok(content) => content,
+            Err(e) => {
+                trace!("Failed to read file at path: {}, error: {}", path.display(), e);
+                // 检查文件是否存在
+                if !path.exists() {
+                    trace!("File does not exist: {}", path.display());
+                } else {
+                    // 检查文件权限
+                    match tokio::fs::metadata(&path).await {
+                        Ok(metadata) => {
+                            trace!(
+                                "File exists, size: {} bytes, readonly: {}",
+                                metadata.len(),
+                                metadata.permissions().readonly()
+                            );
+                        }
+                        Err(e) => {
+                            trace!("Failed to get metadata for file: {}, error: {}", path.display(), e);
+                        }
                     }
                 }
-                {
-                    let variables = v.define.variables.lock();
-                    let mut ctx_variables = ctx.variables.lock();
-                    if !variables.is_empty() {
-                        ctx_variables.extend(variables.clone());
+                return None;
+            }
+        };
+        trace!("read success {} {}", url, &content);
+        // let path = url.to_file_path().ok()?;
+        // let content = tokio::fs::read_to_string(path).await.ok()?;
+        self.did_open(url, &content).await;
+        if let Some(parser) = self.parsers.get(&hash_url) {
+            trace!("create completed");
+            let result = f(parser.value());
+            return Some(result);
+        }
+
+        None
+    }
+
+    fn try_get_type_directly(
+        json_def: &BfastHashMap<String, Value>,
+        control_n: Arc<str>,
+    ) -> Option<String> {
+        if let Some(Value::Object(props)) = json_def.get(&control_n.to_string()) {
+            if let Some(Value::String(type_n)) = props.get("type") {
+                return Some(type_n.clone());
+            }
+        }
+        None
+    }
+
+    fn find_type_or_extend(
+        json_def: BfastHashMap<String, Value>,
+        namespace: Arc<str>,
+        control_name: Arc<str>,
+    ) -> Result<String, Option<(Arc<str>, Arc<str>)>> {
+        for (key, value) in json_def {
+            let control_id = split_control_name(key, namespace.clone());
+            if let Some(control_id) = control_id {
+                if control_id.1 != control_name {
+                    continue;
+                }
+
+                if let Value::Object(props) = value {
+                    if let Some(Value::String(type_)) = props.get("type") {
+                        return Ok(type_.clone());
                     }
                 }
-                if let Some(ref extend) = v.define.name.1 {
-                    ctx.layer.fetch_add(1, std::sync::atomic::Ordering::Acquire);
-                    self.recursive_search(extend, ctx);
+
+                if let Some(extend) = control_id.2 {
+                    return Err(Some(extend));
                 }
+            }
+        }
+
+        Err(None)
+    }
+
+    fn number_to_sort_text(num: usize, width: usize) -> String {
+        format!("{:0width$}", num, width = width)
+    }
+
+    fn from_number_to_insert_text_format(kind: u64) -> Option<InsertTextFormat> {
+        match kind {
+            1 => Some(InsertTextFormat::PLAIN_TEXT),
+            2 => Some(InsertTextFormat::SNIPPET),
+            _ => None,
+        }
+    }
+
+    fn from_number_to_completion_item_kind(kind: u64) -> Option<CompletionItemKind> {
+        match kind {
+            1 => Some(CompletionItemKind::TEXT),
+            2 => Some(CompletionItemKind::METHOD),
+            3 => Some(CompletionItemKind::FUNCTION),
+            4 => Some(CompletionItemKind::CONSTRUCTOR),
+            5 => Some(CompletionItemKind::FIELD),
+            6 => Some(CompletionItemKind::VARIABLE),
+            7 => Some(CompletionItemKind::CLASS),
+            8 => Some(CompletionItemKind::INTERFACE),
+            9 => Some(CompletionItemKind::MODULE),
+            10 => Some(CompletionItemKind::PROPERTY),
+            11 => Some(CompletionItemKind::UNIT),
+            12 => Some(CompletionItemKind::VALUE),
+            13 => Some(CompletionItemKind::ENUM),
+            14 => Some(CompletionItemKind::KEYWORD),
+            15 => Some(CompletionItemKind::SNIPPET),
+            16 => Some(CompletionItemKind::COLOR),
+            17 => Some(CompletionItemKind::FILE),
+            18 => Some(CompletionItemKind::REFERENCE),
+            19 => Some(CompletionItemKind::FOLDER),
+            20 => Some(CompletionItemKind::ENUM_MEMBER),
+            21 => Some(CompletionItemKind::CONSTANT),
+            22 => Some(CompletionItemKind::STRUCT),
+            23 => Some(CompletionItemKind::EVENT),
+            24 => Some(CompletionItemKind::OPERATOR),
+            25 => Some(CompletionItemKind::TYPE_PARAMETER),
+            _ => None,
+        }
+    }
+
+    fn create_simple_completion_item(
+        &self,
+        label: String,
+        lang: Arc<str>,
+        pos: Position,
+        order: usize,
+    ) -> CompletionItem {
+        let define = self.jsonui_define.get(label.as_str());
+        let description = if let Some(Value::Object(define)) = define {
+            let description = define.get("description");
+            if let Some(Value::Object(description)) = description {
+                description
+                    .get(lang.as_ref())
+                    .or(description.get("en-us"))
+                    .map(|f| to_string_ref(f))
+            } else {
+                Some("jsonui-support")
             }
         } else {
-            let r = self.vanilla_controls_table.get(extend);
-            if let Some(r) = r {
-                {
-                    let type_n = r.type_n.lock();
-                    let mut ctx_type_n = ctx.type_n.lock();
-                    if ctx_type_n.borrow().is_none() && type_n.is_some() {
-                        *ctx_type_n = type_n.clone();
-                    }
-                }
-                {
-                    let variables = r.variables.lock();
-                    let mut ctx_variables = ctx.variables.lock();
-                    if !variables.is_empty() {
-                        ctx_variables.extend(variables.clone());
-                    }
-                }
-            }
+            Some("jsonui-support")
+        };
+        CompletionItem {
+            label: label.clone(),
+            label_details: Some(CompletionItemLabelDetails {
+                description: description.map(|s| s.to_string()),
+                ..Default::default()
+            }),
+            kind: Some(CompletionItemKind::TEXT),
+            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                range:    Range {
+                    start: Position {
+                        line:      pos.line,
+                        character: pos.character,
+                    },
+                    end:   Position {
+                        line:      pos.line,
+                        character: pos.character + 1,
+                    },
+                },
+                new_text: format!("{}\"", label),
+            })),
+            insert_text_format: Some(InsertTextFormat::PLAIN_TEXT),
+            sort_text: Some(Self::number_to_sort_text(order, 4)),
+            ..Default::default()
         }
     }
 
-    pub(crate) fn find_extend_value(
+    fn find_variable_key(
         &self,
-        extend: &(Arc<str>, Arc<str>),
-    ) -> Option<(Arc<str>, BfastHashSet<Arc<str>>)> {
-        let ctx = RecursiveSearchContext::new();
-        self.recursive_search(extend, &ctx);
-        let type_n = ctx.type_n.into_inner()?;
-        Some((type_n, ctx.variables.into_inner()))
-    }
-
-    fn pop_tree(ctx: &BuildTreeContext) {
-        let last_node = { ctx.last_node.lock().take() };
-        if let Some(last_node) = last_node {
-            let r = ctx.tree.lock().borrow().get_node_by_id(&last_node);
-            if let Some(r) = r {
-                *ctx.last_node.lock() = r.get_parent_id();
+        result: &mut Vec<String>,
+        symbol_table: &BfastMultiMap<ControlId, Arc<Symbol>>,
+        control_id: &ControlId,
+    ) {
+        let symbols = symbol_table.get_vec(control_id);
+        if let Some(vec) = symbols {
+            for i in vec.iter() {
+                match i.deref() {
+                    Symbol::Control(c) => {
+                        if let Some(c) = c.parent.clone() {
+                            self.find_variable_key(result, symbol_table, &c);
+                        }
+                    }
+                    Symbol::Variable(c) => {
+                        result.push(c.value.to_string());
+                    }
+                    _ => {}
+                }
             }
         }
-        ctx.layer.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
     }
 
-    fn add_tree_node(ctx: &BuildTreeContext, node: ControlNode, id: Option<&AutomatedId>) {
-        let mut tr = ctx.tree.lock();
-        let r = tr.add_node(Node::<AutomatedId, ControlNode>::new_auto(Some(node)), id);
-        match r {
-            Ok(r) => {
-                *ctx.last_node.lock() = Some(r);
+    fn index_document(&self, parser: &DocumentParser) {
+        let metadata = self.build_symbol(parser);
+        self.handle_metadata(metadata);
+    }
+
+    fn handle_metadata(&self, metadata: Vec<(Arc<Symbol>, MetaData)>) {
+        metadata.iter().for_each(|(symbol, metadata)| {
+            if metadata.is_declare {
+                self.definitions.insert(symbol.clone());
+            } else {
+                self.references.insert(symbol.clone());
             }
-            Err(e) => {
-                trace!("error in add node for tree,detail {}", e);
+        });
+    }
+
+    fn build_symbol(&self, parser: &DocumentParser) -> Vec<(Arc<Symbol>, MetaData)> {
+        let url = parser.url;
+        let mut symbol_table = self.symbol_table.entry(url).or_insert(BfastMultiMap::default());
+        {
+            symbol_table.flat_iter().for_each(|(_, v)| {
+                self.definitions.remove(v);
+                self.references.remove(v);
+            });
+            symbol_table.clear();
+        }
+
+        let root_node = parser.tree.root_node();
+        let mut metadata = Vec::new();
+        let mut cursor = root_node.walk();
+        self.traverse_node(&mut cursor, &mut symbol_table, &mut metadata, parser);
+        metadata
+    }
+
+    fn traverse_node(
+        &self,
+        cursor: &mut tree_sitter::TreeCursor,
+        symbol_table: &mut BfastMultiMap<ControlId, Arc<Symbol>>,
+        metadata: &mut Vec<(Arc<Symbol>, MetaData)>,
+        parser: &DocumentParser,
+    ) {
+        let node = cursor.node();
+        match node.kind() {
+            STRING => {
+                if let Some(v) = self.detect_symbol(&node, parser) {
+                    symbol_table.insert(v.0.id(), v.0.clone());
+                    metadata.push(v);
+                }
             }
+            _ => {}
+        }
+        if cursor.goto_first_child() {
+            loop {
+                self.traverse_node(cursor, symbol_table, metadata, parser);
+                if !cursor.goto_next_sibling() {
+                    break;
+                }
+            }
+            cursor.goto_parent();
+        }
+    }
+
+    fn get_parent_control_name(parser: &DocumentParser, node: &Node) -> Option<ControlId> {
+        let parent = parser.get_parent_pair_node(node);
+        if parent.kind() == "document" {
+            return None;
+        }
+        parent
+            .named_child(0)
+            .and_then(|child| parser.get_string(&child))
+            .map(|name| split_control_name(name, parser.namespace()))
+            .flatten()
+    }
+
+    fn detect_symbol(
+        &self,
+        node: &tree_sitter::Node,
+        parser: &DocumentParser,
+    ) -> Option<(Arc<Symbol>, MetaData)> {
+        let string_content = parser.get_string(node)?;
+        let parent_node = parser.get_parent_pair_node(node);
+        let parent = Self::get_parent_control_name(parser, node);
+
+        if self.is_control_key(node) {
+            // for the control node, the first parent its own pair node, so it needs to query again
+            let parent_parent = Self::get_parent_control_name(parser, &parent_node);
+            let id = split_control_name(string_content, parser.namespace())?;
+            let range = self.node_range(&node);
+            let symbol = Arc::new(Symbol::Control(Control {
+                id: id.clone(),
+                range,
+                parent: parent_parent.clone(),
+            }));
+            let metadata = if id.2.is_none() && parent_parent.is_none() {
+                MetaData { is_declare: true }
+            } else {
+                MetaData { is_declare: false }
+            };
+            return Some((symbol, metadata));
+        }
+
+        if string_content.starts_with('$') {
+            let pool = StringPool::global();
+            let spur = pool.get_or_intern(string_content.as_str());
+            let var_name = pool.resolve_to_arc(&spur);
+            if let Some(parent) = parent {
+                let symbol = Arc::new(Symbol::Variable(Variable {
+                    parent,
+                    range: self.node_range(&node),
+                    value: var_name,
+                }));
+                let metadata = node
+                    .next_sibling()
+                    .map(|f| {
+                        if f.kind() == ":" {
+                            MetaData { is_declare: true }
+                        } else {
+                            MetaData { is_declare: false }
+                        }
+                    })
+                    .unwrap_or(MetaData { is_declare: false });
+                return Some((symbol, metadata));
+            }
+        }
+
+        if string_content.eq("color") {
+            // get the parent control name for color node
+            let parent = parent?;
+            let (value, range) = node
+                .next_named_sibling()
+                .map(|ref sibling| match sibling.kind() {
+                    STRING => {
+                        let range = self.node_range(sibling);
+                        let v = ColorValue::String(parser.get_string(sibling).unwrap_or("".to_string()));
+                        Some((v, range))
+                    }
+                    ARRAY => {
+                        let range = self.node_range(sibling);
+                        let vec = sibling
+                            .named_children(&mut sibling.walk())
+                            .filter_map(|child| parser.float(child))
+                            .collect::<Vec<f64>>();
+                        Some((ColorValue::Vec(vec), range))
+                    }
+                    _ => None,
+                })
+                .flatten()?;
+            let node = Arc::new(Symbol::Color(Color { parent, range, value }));
+            let metadata = MetaData { is_declare: false };
+            return Some((node, metadata));
+        }
+        None
+    }
+
+    fn is_control_key(&self, node: &tree_sitter::Node) -> bool {
+        node.next_sibling()
+            .filter(|next| next.kind() == ":")
+            .and_then(|colon| colon.next_sibling())
+            .filter(|value| value.kind() == "object")
+            .and_then(|_| node.parent())
+            .map_or(false, |parent| parent.kind() == "pair")
+    }
+
+    fn node_range(&self, node: &tree_sitter::Node) -> HashRange {
+        HashRange {
+            start: HashPosition {
+                line:      node.start_position().row as u32,
+                character: node.start_position().column as u32,
+            },
+            end:   HashPosition {
+                line:      node.end_position().row as u32,
+                character: node.end_position().column as u32,
+            },
         }
     }
 }
 
-pub(crate) fn split_control_name(name: &str, def_namespace: &str) -> ControlName {
-    let mut part1 = "";
-    let mut part2 = None;
+fn split_control_name(name: String, def_namespace: Arc<str>) -> Option<ControlId> {
+    let default_namespace = def_namespace;
     let parts: Vec<&str> = name.split('@').collect();
-    let namespace_parts = match parts.len() {
+    match parts.len() {
         2 => {
-            part1 = parts[0];
-            parts[1].split('.').collect()
+            let split_result: Vec<&str> = parts[1].split('.').collect();
+            Some(match split_result.as_slice() {
+                [a, b] => (default_namespace, Arc::from(parts[0]), Some((Arc::from(*a), Arc::from(*b)))),
+                [a] => (
+                    default_namespace.clone(),
+                    Arc::from(parts[0]),
+                    Some((default_namespace, Arc::from(*a))),
+                ),
+                _ => (default_namespace, Arc::from(parts[0]), None),
+            })
         }
-        1 => {
-            part1 = parts[0];
-            vec![]
-        }
-        _ => {
-            vec![]
-        }
-    };
-    match namespace_parts.len() {
-        2 => {
-            part2 = Some((Arc::from(namespace_parts[0]), Arc::from(namespace_parts[1])));
-        }
-        1 => {
-            part2 = Some((Arc::from(def_namespace), Arc::from(namespace_parts[0])));
-        }
-        _ => {}
+        1 => Some((default_namespace, Arc::from(parts[0]), None)),
+        _ => None,
     }
-    (Arc::from(part1), part2)
 }
 
 #[cfg(test)]
@@ -645,32 +1478,243 @@ mod tests {
 
     #[test]
     fn test_split_control_name() {
-        let r = split_control_name("empty_progress_bar_icon", "achievement");
-        assert_eq!((Arc::from("empty_progress_bar_icon"), None), r);
-        let r = split_control_name("empty_progress_bar_icon@test.cc", "achievement");
+        let default: Arc<str> = Arc::from("achievement");
+        let r =
+            split_control_name("empty_progress_bar_icon".to_string(), Arc::from("achievement")).unwrap();
+        assert_eq!((default.clone(), Arc::from("empty_progress_bar_icon"), None), r);
+
+        let r =
+            split_control_name("empty_progress_bar_icon@test.cc".to_string(), Arc::from("achievement"))
+                .unwrap();
         assert_eq!(
-            (Arc::from("empty_progress_bar_icon"), Some((Arc::from("test"), Arc::from("cc")))),
+            (
+                default.clone(),
+                Arc::from("empty_progress_bar_icon"),
+                Some((Arc::from("test"), Arc::from("cc")))
+            ),
             r
         );
-        let r = split_control_name("empty_progress_bar_icon@cc", "achievement");
+
+        let r = split_control_name("empty_progress_bar_icon@cc".to_string(), Arc::from("achievement"))
+            .unwrap();
         assert_eq!(
-            (Arc::from("empty_progress_bar_icon"), Some((Arc::from("achievement"), Arc::from("cc")))),
+            (
+                default.clone(),
+                Arc::from("empty_progress_bar_icon"),
+                Some((Arc::from("achievement"), Arc::from("cc")))
+            ),
             r
         );
     }
 
-    #[tokio::test]
-    async fn test_completer_init() {
-        let p = crate::load_completer();
-        let path = PathBuf::from("test");
-        assert!(path.exists());
-        crate::tests::setup_logger();
-        p.init(&path).await;
-        assert!(p.contain_tree("achievement"));
-        assert!(p.contain_tree("add_external_server"));
-        let trees = p.trees.read();
-        for (_, v) in trees.iter() {
-            println!("tree {} \n------------", v);
-        }
+    fn create_parser(content: &str) -> DocumentParser {
+        DocumentParser::default(content)
+    }
+
+    #[test]
+    fn test_symbol_table_with_variable() {
+        let completer = Completer::new(BfastHashMap::default(), BfastHashMap::default());
+        let content = r#"{
+            "namespace": "default",
+            "test": {
+                "key": "$variable"
+            }
+        }"#;
+        let parser = create_parser(content);
+        completer.index_document(&parser);
+
+        let symbol_table = completer.symbol_table.get(&0).unwrap();
+        let namespace = Arc::from("default");
+        let spur = Arc::from("test");
+        let control_name = (namespace, spur, None);
+        let vec = symbol_table.get_vec(&control_name).unwrap();
+
+        assert_eq!(vec.len(), 2);
+        match vec.get(1).unwrap().deref() {
+            Symbol::Variable(variable) => assert_eq!(variable.value.as_ref(), "$variable"),
+            _ => panic!("Expected Variable symbol"),
+        };
+    }
+
+    #[test]
+    fn test_empty_document() {
+        let completer = Completer::new(BfastHashMap::default(), BfastHashMap::default());
+        let parser = create_parser("{}");
+        completer.index_document(&parser);
+        assert!(completer.symbol_table.get(&0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_update_document() {
+        let json = r#"{
+            "name": "John Doe",
+            "age": 30,
+            "is_active": true,
+            "scores": [95.5, 89.0, 92.3],
+            "address": {
+                "street": "123 Main St",
+                "city": "Anytown"
+            }
+        }"#;
+        let expect = r#"{
+            "name": "John Doe",
+            "age": 3022,
+            "is_active": true,
+            "scores": [95.5, 89.0, 92.3],
+            "address": {
+                "street": "123 Main St",
+                "city": "Anytown"
+            }
+        }"#;
+        let mut parser = DocumentParser::default(json);
+        let change1 = TextDocumentContentChangeEvent {
+            range:        Some(Range {
+                start: Position {
+                    line:      2,
+                    character: 21,
+                },
+                end:   Position {
+                    line:      2,
+                    character: 21,
+                },
+            }),
+            text:         "2".to_string(),
+            range_length: Some(0),
+        };
+        let change2 = TextDocumentContentChangeEvent {
+            range:        Some(Range {
+                start: Position {
+                    line:      2,
+                    character: 22,
+                },
+                end:   Position {
+                    line:      2,
+                    character: 22,
+                },
+            }),
+            text:         "2".to_string(),
+            range_length: Some(0),
+        };
+        let old_parser = parser.clone();
+        parser.edit(&change1);
+        parser.edit(&change2);
+        assert_eq!(expect, parser.rope.to_string());
+
+        let old_parser_tree = format!("{:?}", old_parser);
+        assert!(old_parser_tree.contains("Rope length: 253 bytes"));
+        assert!(old_parser_tree.contains(r#"\"name\": \"John Doe\""#));
+        assert!(old_parser_tree.contains(r#"\"John Doe\""#));
+        assert!(old_parser_tree.contains(r#"\"age\": 30"#));
+
+        let new_parser_tree = format!("{:?}", parser);
+        assert!(new_parser_tree.contains("Rope length: 255 bytes"));
+        assert!(new_parser_tree.contains(r#"\"name\": \"John Doe\""#));
+        assert!(new_parser_tree.contains(r#"\"John Doe\""#));
+        assert!(new_parser_tree.contains(r#"\"age\": 3022"#));
+    }
+
+    #[test]
+    fn test_update_document_with_utf8() {
+        let json = r#"{
+            "name": "李华",
+            "age": 30,
+            "is_active": true,
+            "scores": [95.5, 89.0, 92.3],
+            "address": {
+                "street": "123 Main St",
+                "city": "Anytown"
+            }
+        }"#;
+        let expect = r#"{
+            "name": "李华一",
+            "age": 30,
+            "is_active": true,
+            "scores": [95.5, 89.0, 92.3],
+            "address": {
+                "street": "123 Main St",
+                "city": "Anytown"
+            }
+        }"#;
+        let mut parser = DocumentParser::default(json);
+        let change1 = TextDocumentContentChangeEvent {
+            range:        Some(Range {
+                start: Position {
+                    line:      1,
+                    character: 23,
+                },
+                end:   Position {
+                    line:      1,
+                    character: 23,
+                },
+            }),
+            text:         "一".to_string(),
+            range_length: Some(0),
+        };
+        let old_parser = parser.clone();
+        parser.edit(&change1);
+        assert_eq!(expect, parser.rope.to_string());
+
+        let old_parser_tree = format!("{:?}", old_parser);
+        assert!(old_parser_tree.contains("Rope length: 251 bytes"));
+        assert!(old_parser_tree.contains(r#"\"name\": \"李华\""#));
+        assert!(old_parser_tree.contains(r#"\"age\": 30"#));
+
+        let new_parser_tree = format!("{:?}", parser);
+        assert!(new_parser_tree.contains("Rope length: 254 bytes"));
+        assert!(new_parser_tree.contains(r#"\"name\": \"李华一\""#));
+        assert!(new_parser_tree.contains(r#"\"age\": 30"#));
+    }
+
+    #[test]
+    fn test_cmp_hash_range() {
+        let range1 = HashRange {
+            start: HashPosition {
+                line:      0,
+                character: 10,
+            },
+            end:   HashPosition {
+                line:      0,
+                character: 15,
+            },
+        };
+        let range2 = HashRange {
+            start: HashPosition {
+                line:      0,
+                character: 11,
+            },
+            end:   HashPosition {
+                line:      0,
+                character: 13,
+            },
+        };
+        let range3 = HashRange {
+            start: HashPosition {
+                line:      0,
+                character: 9,
+            },
+            end:   HashPosition {
+                line:      0,
+                character: 13,
+            },
+        };
+        let range4 = HashRange {
+            start: HashPosition {
+                line:      0,
+                character: 9,
+            },
+            end:   HashPosition {
+                line:      0,
+                character: 15,
+            },
+        };
+        assert!(range1 > range2);
+        assert!(range1 > range3);
+        assert!(range1 < range4);
+        let mut vec = vec![range1, range2, range3, range4];
+        vec.sort();
+        assert_eq!(
+            format!("{:?}", vec),
+            r#"[HashRange { start: HashPosition { line: 0, character: 11 }, end: HashPosition { line: 0, character: 13 } }, HashRange { start: HashPosition { line: 0, character: 9 }, end: HashPosition { line: 0, character: 13 } }, HashRange { start: HashPosition { line: 0, character: 10 }, end: HashPosition { line: 0, character: 15 } }, HashRange { start: HashPosition { line: 0, character: 9 }, end: HashPosition { line: 0, character: 15 } }]"#
+        )
     }
 }

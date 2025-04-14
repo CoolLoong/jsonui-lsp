@@ -1,6 +1,9 @@
 # Change Log
-
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
+
+## [0.2.0] - 2024-12-11
+### Changed
+- Update Bedrock 1.21.70
 
 ## [0.1.1] - 2024-12-11
 ### Changed

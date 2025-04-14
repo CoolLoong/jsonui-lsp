@@ -1,0 +1,7 @@
+{
+    "log.description": "Traces the communication between VSCode and JSONUI-LSP",
+    "log.level.off": "No traces",
+    "log.level.messages": "Error only",
+    "log.level.verbose": "Full log",
+    "auto_append_suffix.description": "Append commas automatically when completing"
+}

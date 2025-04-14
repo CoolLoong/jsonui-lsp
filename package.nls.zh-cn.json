@@ -1,0 +1,7 @@
+{
+    "log.description": "追踪 VSCode 与 JSONUI-LSP 之间的通信。",
+    "log.level.off": "无日志",
+    "log.level.messages": "仅错误",
+    "log.level.verbose": "完整日志",
+    "auto_append_suffix.description": "在补全选项时自动追加逗号分隔"
+}
