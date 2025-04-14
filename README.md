@@ -25,12 +25,13 @@ This VSCode extension enhances the creation of Minecraft Bedrock JSON-UI by prov
 Contributions are welcome!
 
 #### Complie guide
-Development IDE with `vscode`, prepare `rust` and `nodejs` environment. Install pnpm package manager.
-1. `pnpm i`
-2. use nightly rust feature
+Development IDE with `vscode`, prepare `rust` and `nodejs` environment. Install `bun` package manager.
+1. `bun i -D webpack-cli`
+2. `bun i`
+3. use nightly rust feature
  `rustup toolchain install nightly`
  `rustup override set nightly`
-3. debug use `F5`
+1. debug use `F5`
 
 ### License
 This project is licensed under the MIT License.

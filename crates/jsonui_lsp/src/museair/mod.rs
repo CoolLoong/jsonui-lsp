@@ -1,8 +1,11 @@
 use museair::BaseHasher;
 
 pub type BfastHashSet<T> = std::collections::HashSet<T, BfastHash<true>>;
+pub type BfastDashSet<T> = dashmap::DashSet<T, BfastHash<true>>;
+
 pub type BfastHashMap<K, V> = std::collections::HashMap<K, V, BfastHash<true>>;
 pub type BfastDashMap<K, V> = dashmap::DashMap<K, V, BfastHash<true>>;
+pub type BfastMultiMap<K, V> = multimap::MultiMap<K, V, BfastHash<true>>;
 
 #[derive(Clone, Default)]
 pub(crate) struct BfastHash<const BFAST: bool>();
