@@ -32,7 +32,7 @@ use walkdir::WalkDir;
 use crate::completer::VanillaControlDefine;
 use crate::museair::BfastHashMap;
 
-const VANILLA_PACK_DEFINE: &str = include_str!("resources/vanillapack_define_1.21.50.7.json");
+const VANILLA_PACK_DEFINE: &str = include_str!("resources/vanillapack_define_1.21.70.3.json");
 const JSONUI_DEFINE: &str = include_str!("resources/jsonui_define.json");
 
 pub(crate) struct Config {

@@ -2,13 +2,13 @@
 	"name": "jsonui-support-client",
 	"description": "A VSCode extension providing intelligent code completion for Minecraft Bedrock JSON-UI.",
 	"license": "MIT",
-	"version": "0.1.2",
+	"version": "0.2.0",
 	"engines": {
 		"vscode": "^1.85.0"
 	},
 	"dependencies": {},
 	"devDependencies": {
-		"@types/node": "22.14.0",
+		"@types/node": "22.14.1",
 		"@types/vscode": "1.99.1",
 		"@vscode/test-electron": "2.5.2"
 	}

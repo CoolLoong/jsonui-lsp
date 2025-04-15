@@ -200,13 +200,6 @@ impl Completer {
         lang: Arc<TokioMutex<Config>>,
         params: &CompletionParams,
     ) -> Option<Vec<CompletionItem>> {
-        let (lang, append_suffix) = if let Ok(config) = lang.try_lock() {
-            (config.lang.clone(), config.append_suffix)
-        } else {
-            trace!("cant find client lang and settings!");
-            return None;
-        };
-
         let url = hash_url(&url);
         let parser_ref = if let Some(parser) = self.parsers.get(&url) {
             parser
@@ -222,16 +215,21 @@ impl Completer {
             trace!("{:?}", &parser_ref);
             return None;
         };
-        let parents = parser_ref.get_parents(&node);
+        let quote_pos = Self::get_position_for_quote(&node);
         let parent = parser_ref.get_parent_pair_node(&node);
-
         // Early return for document nodes
         if parent.kind() == "document" {
             return None;
         }
+        let (lang, append_suffix) = if let Ok(config) = lang.try_lock() {
+            (config.lang.clone(), config.append_suffix)
+        } else {
+            trace!("cant find client lang and settings!");
+            return None;
+        };
+        let parents = parser_ref.get_parents(&node);
         let char = params.context.as_ref()?.trigger_character.as_ref()?;
         let p1 = parents.first()?;
-
         let (before, after) = parser_ref.get_adjacent_nodes(&node);
         let [n1, n2] = [before.first(), before.get(1)];
         let [n3, n4] = [after.first(), after.get(1)];
@@ -245,7 +243,7 @@ impl Completer {
             parser_ref.print_node(p1),
             char
         );
-        let completion_type = match char.as_str() {
+        let completion_type: u8 = match char.as_str() {
             "\"" => {
                 if let Some(current_str) = parser_ref.get_string(&node)
                     && current_str == ""
@@ -259,7 +257,7 @@ impl Completer {
                             }
                         } else {
                             trace!("Error 5");
-                            999
+                            255
                         }
                     } else if n2.map_or(false, |n| n.kind() == ":") {
                         2 // common value completion
@@ -268,7 +266,7 @@ impl Completer {
                     }
                 } else {
                     trace!("Error 6 current_str is {:?}", parser_ref.get_string(&node));
-                    999
+                    255
                 }
             }
             ":" => {
@@ -278,58 +276,37 @@ impl Completer {
                             3 // binding value completion
                         } else {
                             trace!("Error 4");
-                            999
+                            255
                         }
                     } else {
                         trace!("Error 3");
-                        999
+                        255
                     }
                 } else if n2.map_or(false, |n| self.is_string_node(n)) {
                     2 // common value completion
                 } else {
                     trace!("Error 2");
-                    999
+                    255
                 }
             }
             _ => {
                 trace!("Error 1");
-                999
+                255
             }
         };
         drop(parser_ref);
-        let input = (completion_type, pos, lang, append_suffix);
         trace!("completion_type {}", completion_type);
-        None
-        // match completion_type {
-        //     0 => {
-        //         let pos = self.get_position_for_quote(&node);
-        //         self.create_common_type_completion(&parser, pos, parent, lang)
-        //             .await
-        //     }
-        //     1 => self.create_binding_type_completion(&parser, &node, lang),
-        //     2 => {
-        //         let pos = self.get_position_for_quote(&node);
-        //         self.create_value_completion(
-        //             (n1, n2, n3),
-        //             &parser,
-        //             &symbol_table,
-        //             parent,
-        //             pos,
-        //             lang,
-        //             append_suffix,
-        //         )
-        //     }
-        //     3 => self.create_value_completion(
-        //         (n1, n2, n3),
-        //         &parser,
-        //         &symbol_table,
-        //         parent,
-        //         pos,
-        //         lang,
-        //         append_suffix,
-        //     ),
-        //     _ => None,
-        // }
+        match completion_type {
+            0 => {
+                self.create_common_type_completion(url, pos, quote_pos, lang.clone())
+                    .await
+            }
+            1 => self.create_binding_type_completion(url, pos, quote_pos, lang.clone()),
+            2 | 3 => {
+                self.create_value_completion(completion_type, url, pos, quote_pos, lang, append_suffix)
+            }
+            _ => None,
+        }
     }
 
     pub(crate) fn complete_color(&self, url: Url) -> Option<Vec<ColorInformation>> {
@@ -357,13 +334,13 @@ impl Completer {
         let url = &params.text_document_position_params.text_document.uri;
         let pos = params.text_document_position_params.position;
         let hash_url = &hash_url(url);
-        let parser = self.parsers.get(&hash_url)?;
-
-        let node = parser.get_node_at_position(pos);
+        let parser_ref = self.parsers.get(&hash_url)?;
         let symbol_table = self.symbol_table.get(hash_url)?;
-        let namespace = parser.namespace();
+
+        let node = parser_ref.get_node_at_position(pos);
+        let namespace = parser_ref.namespace();
         if let Some(node) = node {
-            let range = self.node_range(&node);
+            let range = Self::node_range(&node);
             let mut containing_symbols: Vec<_> = symbol_table
                 .flat_iter()
                 .filter(|f| f.0 .0 == namespace)
@@ -386,8 +363,11 @@ impl Completer {
                 });
                 Some(containing_symbols[0])
             }?;
+            let symbol = symbol.to_owned();
             trace!("try find_definition");
-            let loc = self.find_definition(symbol).await?;
+            drop(parser_ref);
+            drop(symbol_table);
+            let loc = self.find_definition(symbol.deref()).await?;
             Some(GotoDefinitionResponse::Scalar(loc))
         } else {
             None
@@ -398,12 +378,12 @@ impl Completer {
         let url = &params.text_document_position.text_document.uri;
         let pos = params.text_document_position.position;
         let hash_url = &hash_url(url);
-        let parser = self.parsers.get(hash_url)?;
-        let node = parser.get_node_at_position(pos);
+        let parser_ref = self.parsers.get(hash_url)?;
         let symbol_table = self.symbol_table.get(hash_url)?;
-        let namespace = parser.namespace();
+        let node = parser_ref.get_node_at_position(pos);
+        let namespace = parser_ref.namespace();
         if let Some(node) = node {
-            let range = self.node_range(&node);
+            let range = Self::node_range(&node);
             let mut containing_symbols: Vec<_> = symbol_table
                 .flat_iter()
                 .filter(|f| f.0 .0 == namespace)
@@ -426,7 +406,10 @@ impl Completer {
                 });
                 Some(containing_symbols[0])
             }?;
-            return Some(self.find_references(symbol));
+            let symbol = symbol.to_owned();
+            drop(parser_ref);
+            drop(symbol_table);
+            return Some(self.find_references(symbol.deref()));
         }
         None
     }
@@ -445,12 +428,10 @@ impl Completer {
 
     pub(crate) async fn did_open(&self, url: &Url, content: &str) {
         let hash_url = hash_url(url);
-        trace!("hash url is {}", hash_url);
         let parser = self.parsers.entry(hash_url).or_insert_with(|| {
             trace!("Init parser, url({}) hash_url({})", url, hash_url);
             DocumentParser::new(hash_url, &content)
         });
-        trace!("parser is {:?}", parser);
         self.namespace_to_url
             .entry(parser.namespace())
             .or_insert(url.clone());
@@ -499,7 +480,7 @@ impl Completer {
         match symbol {
             Symbol::Control(c) => {
                 let extend = c.id.2.clone()?;
-                let url = self.namespace_to_url.get(&extend.0)?;
+                let url = self.get_url(extend.0.clone())?;
                 self.get_or_create_parser(&url, |_| {}).await;
 
                 self.definitions
@@ -559,13 +540,13 @@ impl Completer {
         }
     }
 
-    fn get_url(&self, spur: Arc<str>) -> Option<Url> {
-        let r = self.namespace_to_url.get(&spur)?;
+    fn get_url(&self, namespace: Arc<str>) -> Option<Url> {
+        let r = self.namespace_to_url.get(&namespace)?;
         Some(r.clone())
     }
 
-    fn get_position_for_quote(&self, node: &Node) -> Position {
-        let pos = self.node_range(node);
+    fn get_position_for_quote(node: &Node) -> Position {
+        let pos = Self::node_range(node);
         Position {
             line:      pos.start.line,
             character: (pos.start.character + pos.end.character) / 2,
@@ -774,25 +755,29 @@ impl Completer {
     // - variables key
     async fn create_common_type_completion<'a>(
         &self,
-        parser: &DocumentParser,
+        url: u64,
         pos: Position,
-        parent: Node<'a>,
+        quote_pos: Position,
         lang: Arc<str>,
     ) -> Option<Vec<CompletionItem>> {
+        let parser_ref = self.parsers.get(&url)?;
+        let node = parser_ref.get_node_at_position(pos)?;
+        let parent = parser_ref.get_parent_pair_node(&node);
         let common_key = Self::extract_strings(self.jsonui_define.get("common"));
         // if not root node
         let type_key = {
             let key = parent.named_child(0).unwrap();
             let value = parent.named_child(1).unwrap();
-            let type_n = parser.field(value, "type");
+            let type_n = parser_ref.field(value, "type");
 
-            let control_id = parser.string(key).unwrap();
-            let control_id = split_control_name(control_id, parser.namespace());
+            let control_id = parser_ref.string(key).unwrap();
+            let control_id = split_control_name(control_id, parser_ref.namespace());
             if let Some(control_id) = control_id {
                 let type_n = if let Some(type_n) = type_n {
-                    Some(parser.string(type_n).unwrap())
+                    Some(parser_ref.string(type_n).unwrap())
                 } else {
                     if let Some(control_id) = control_id.2 {
+                        drop(parser_ref);
                         self.find_control_type(control_id).await
                     } else {
                         None
@@ -812,11 +797,11 @@ impl Completer {
         let mut result = Vec::with_capacity(type_key.len() + common_key.len());
         let mut order = 0 as usize;
         common_key.into_iter().for_each(|k| {
-            result.push(self.create_simple_completion_item(k, lang.clone(), pos, order));
+            result.push(self.create_simple_completion_item(k, lang.clone(), quote_pos, order));
             order += 1;
         });
         type_key.into_iter().for_each(|k| {
-            result.push(self.create_simple_completion_item(k, lang.clone(), pos, order));
+            result.push(self.create_simple_completion_item(k, lang.clone(), quote_pos, order));
             order += 1;
         });
         if result.is_empty() {
@@ -828,27 +813,32 @@ impl Completer {
 
     fn create_binding_type_completion(
         &self,
-        parser: &DocumentParser,
-        current: &Node,
+        url: u64,
+        pos: Position,
+        quote_pos: Position,
         lang: Arc<str>,
     ) -> Option<Vec<CompletionItem>> {
-        let pos = self.get_position_for_quote(current);
+        let parser_ref = self.parsers.get(&url)?;
+        let current = parser_ref.get_node_at_position(pos)?;
+
         let common_key = Self::extract_strings(self.jsonui_define.get("bindings_properties"));
         // if not root node
         let type_key = {
             let type_n = self
-                .find_binding_type(parser, current)
+                .find_binding_type(&parser_ref, &current)
                 .unwrap_or("global".to_string());
             Self::extract_strings(self.jsonui_define.get(type_n.as_str()))
         };
+        drop(parser_ref);
+
         let mut result = Vec::with_capacity(type_key.len() + common_key.len());
         let mut order = 0 as usize;
         common_key.into_iter().for_each(|k| {
-            result.push(self.create_simple_completion_item(k, lang.clone(), pos, order));
+            result.push(self.create_simple_completion_item(k, lang.clone(), quote_pos, order));
             order += 1;
         });
         type_key.into_iter().for_each(|k| {
-            result.push(self.create_simple_completion_item(k, lang.clone(), pos, order));
+            result.push(self.create_simple_completion_item(k, lang.clone(), quote_pos, order));
             order += 1;
         });
         if result.is_empty() {
@@ -863,20 +853,27 @@ impl Completer {
     // - variables reference
     fn create_value_completion(
         &self,
-        nodes: (Option<&Node>, Option<&Node>, Option<&Node>),
-        parser: &DocumentParser,
-        symbol_table: &BfastMultiMap<ControlId, Arc<Symbol>>,
-        parent: Node,
+        completion_type: u8,
+        url: u64,
         pos: Position,
+        quote_pos: Position,
         lang: Arc<str>,
         append_suffix: bool,
     ) -> Option<Vec<CompletionItem>> {
-        let (n1, n2, n3) = nodes;
-
+        let parser_ref = self.parsers.get(&url)?;
+        let symbol_table = self.symbol_table.get(&url)?;
+        let node = parser_ref.get_node_at_position(pos)?;
+        let parent = parser_ref.get_parent_pair_node(&node);
+        let (before, after) = parser_ref.get_adjacent_nodes(&node);
+        let [n1, n2] = [before.first(), before.get(1)];
+        let [n3, n4] = [after.first(), after.get(1)];
+        let pos = if completion_type == 2 { quote_pos } else { pos };
         // Determine current key
         let current_is_colon = n2.map_or(false, |n| n.kind() != ":");
         let key_node = if current_is_colon { n2 } else { n1 };
-        let key = key_node.and_then(|n| parser.get_string(n)).unwrap_or_default();
+        let key = key_node
+            .and_then(|n| parser_ref.get_string(n))
+            .unwrap_or_default();
 
         // Get completion values from JSON definition
         let Some(values_def) = self.jsonui_define.get(&key) else {
@@ -901,16 +898,18 @@ impl Completer {
 
         // Add variables
         if let Some(key) = parent.named_child(0) {
-            if let Some(control_name) = parser.string(key) {
-                let control_id = split_control_name(control_name, parser.namespace());
+            if let Some(control_name) = parser_ref.string(key) {
+                let control_id = split_control_name(control_name, parser_ref.namespace());
                 if let Some(control_id) = control_id {
                     let mut variables = Vec::new();
-                    self.find_variable_key(&mut variables, symbol_table, &control_id);
+                    self.find_variable_key(&mut variables, &symbol_table, &control_id);
                     values.extend(variables.into_iter().map(Value::String));
                 }
             }
         }
-
+        drop(parser_ref);
+        drop(symbol_table);
+        
         // Process completions
         let completions = values
             .into_iter()
@@ -1054,8 +1053,10 @@ impl Completer {
     }
 
     async fn get_all_kv(&self, refer: &(Arc<str>, Arc<str>)) -> Option<BfastHashMap<String, Value>> {
-        let url = &self.namespace_to_url.get(&refer.0)?.clone();
-        self.get_or_create_parser(url, |parser| {
+        let url = {
+            self.namespace_to_url.get(&refer.0)?.clone()
+        };
+        self.get_or_create_parser(&url, |parser| {
             let json_def = parser.hashmap();
             Some(json_def)
         })
@@ -1109,7 +1110,6 @@ impl Completer {
                 return None;
             }
         };
-        trace!("read success {} {}", url, &content);
         // let path = url.to_file_path().ok()?;
         // let content = tokio::fs::read_to_string(path).await.ok()?;
         self.did_open(url, &content).await;
@@ -1304,12 +1304,11 @@ impl Completer {
         let root_node = parser.tree.root_node();
         let mut metadata = Vec::new();
         let mut cursor = root_node.walk();
-        self.traverse_node(&mut cursor, &mut symbol_table, &mut metadata, parser);
+        Self::traverse_node(&mut cursor, &mut symbol_table, &mut metadata, parser);
         metadata
     }
 
     fn traverse_node(
-        &self,
         cursor: &mut tree_sitter::TreeCursor,
         symbol_table: &mut BfastMultiMap<ControlId, Arc<Symbol>>,
         metadata: &mut Vec<(Arc<Symbol>, MetaData)>,
@@ -1318,7 +1317,7 @@ impl Completer {
         let node = cursor.node();
         match node.kind() {
             STRING => {
-                if let Some(v) = self.detect_symbol(&node, parser) {
+                if let Some(v) = Self::detect_symbol(&node, parser) {
                     symbol_table.insert(v.0.id(), v.0.clone());
                     metadata.push(v);
                 }
@@ -1327,7 +1326,7 @@ impl Completer {
         }
         if cursor.goto_first_child() {
             loop {
-                self.traverse_node(cursor, symbol_table, metadata, parser);
+                Self::traverse_node(cursor, symbol_table, metadata, parser);
                 if !cursor.goto_next_sibling() {
                     break;
                 }
@@ -1349,7 +1348,6 @@ impl Completer {
     }
 
     fn detect_symbol(
-        &self,
         node: &tree_sitter::Node,
         parser: &DocumentParser,
     ) -> Option<(Arc<Symbol>, MetaData)> {
@@ -1357,11 +1355,11 @@ impl Completer {
         let parent_node = parser.get_parent_pair_node(node);
         let parent = Self::get_parent_control_name(parser, node);
 
-        if self.is_control_key(node) {
+        if Self::is_control_key(node) {
             // for the control node, the first parent its own pair node, so it needs to query again
             let parent_parent = Self::get_parent_control_name(parser, &parent_node);
             let id = split_control_name(string_content, parser.namespace())?;
-            let range = self.node_range(&node);
+            let range = Self::node_range(&node);
             let symbol = Arc::new(Symbol::Control(Control {
                 id: id.clone(),
                 range,
@@ -1382,7 +1380,7 @@ impl Completer {
             if let Some(parent) = parent {
                 let symbol = Arc::new(Symbol::Variable(Variable {
                     parent,
-                    range: self.node_range(&node),
+                    range: Self::node_range(&node),
                     value: var_name,
                 }));
                 let metadata = node
@@ -1406,12 +1404,12 @@ impl Completer {
                 .next_named_sibling()
                 .map(|ref sibling| match sibling.kind() {
                     STRING => {
-                        let range = self.node_range(sibling);
+                        let range = Self::node_range(sibling);
                         let v = ColorValue::String(parser.get_string(sibling).unwrap_or("".to_string()));
                         Some((v, range))
                     }
                     ARRAY => {
-                        let range = self.node_range(sibling);
+                        let range = Self::node_range(sibling);
                         let vec = sibling
                             .named_children(&mut sibling.walk())
                             .filter_map(|child| parser.float(child))
@@ -1428,7 +1426,7 @@ impl Completer {
         None
     }
 
-    fn is_control_key(&self, node: &tree_sitter::Node) -> bool {
+    fn is_control_key(node: &tree_sitter::Node) -> bool {
         node.next_sibling()
             .filter(|next| next.kind() == ":")
             .and_then(|colon| colon.next_sibling())
@@ -1437,7 +1435,7 @@ impl Completer {
             .map_or(false, |parent| parent.kind() == "pair")
     }
 
-    fn node_range(&self, node: &tree_sitter::Node) -> HashRange {
+    fn node_range(node: &tree_sitter::Node) -> HashRange {
         HashRange {
             start: HashPosition {
                 line:      node.start_position().row as u32,
