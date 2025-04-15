@@ -90,7 +90,7 @@ impl DocumentParser {
         } else {
             None
         };
-        let namespace = namespace.map_or(Arc::from(""), |f| Arc::from(f.as_str()));
+        let namespace = namespace.map_or(Arc::from("Unknown"), |f| Arc::from(f.as_str()));
         DocumentParser {
             url,
             namespace,
