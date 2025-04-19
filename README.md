@@ -3,7 +3,7 @@
 [![CI](https://github.com/CoolLoong/jsonui-lsp/actions/workflows/ci.yml/badge.svg)](https://github.com/CoolLoong/jsonui-lsp/actions/workflows/ci.yml)
 [![GitHub License](https://img.shields.io/github/license/CoolLoong/jsonui-lsp)](LICENSE)
 [![Discord](https://img.shields.io/discord/1304443010439970876?label=Discord&logo=discord)](https://discord.gg/S2ZKgGusjk)
-[![Minecraft - Version](https://img.shields.io/badge/minecraft-v1.21.50.7_(Bedrock)-black)](https://feedback.minecraft.net/hc/en-us/articles/31222183227149-Minecraft-Bedrock-Edition-1-21-40-Bundles-of-Bravery)
+[![Minecraft - Version](https://img.shields.io/badge/minecraft-v1.21.70.3_(Bedrock)-black)](https://feedback.minecraft.net/hc/en-us/articles/35256043330189-Minecraft-Bedrock-Edition-1-21-70-Spring-to-Life)
 [![Ko-Fi](https://img.shields.io/badge/Buy_Me_a_Coffee-f37574?logo=kofi&logoColor=white)](https://patreon.com/coolloong)
 
 ### Introduction

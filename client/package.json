@@ -6,7 +6,9 @@
 	"engines": {
 		"vscode": "^1.85.0"
 	},
-	"dependencies": {},
+	"dependencies": {
+		"vscode-languageclient": "9.0.1"
+	},
 	"devDependencies": {
 		"@types/node": "22.14.1",
 		"@types/vscode": "1.99.1",

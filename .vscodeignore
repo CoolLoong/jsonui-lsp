@@ -11,8 +11,10 @@ target
 .gitignore
 Cargo.lock
 Cargo.toml
+bun.lock
 pnpm-lock.yaml
 rust-toolchain
 rustfmt.toml
 tsconfig.json
 webpack.config.js
+esbuild.ts
