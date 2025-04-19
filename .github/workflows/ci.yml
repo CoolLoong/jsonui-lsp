@@ -14,27 +14,22 @@ jobs:
           - os: windows-latest
             platform: win32
             arch: x64
-            bun_config_arch: x64
             rust_target: x86_64-pc-windows-gnu
           - os: ubuntu-latest
             platform: linux
             arch: x64
-            bun_config_arch: x64
             rust_target: x86_64-unknown-linux-gnu
           - os: ubuntu-latest
             platform: linux
             arch: arm64
-            bun_config_arch: arm64
             rust_target: aarch64-unknown-linux-gnu
           - os: macos-latest
             platform: darwin
             arch: x64
-            bun_config_arch: x64
             rust_target: x86_64-apple-darwin
           - os: macos-latest
             platform: darwin
             arch: arm64
-            bun_config_arch: arm64
             rust_target: aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
     steps:
@@ -63,7 +58,6 @@ jobs:
       - run: bun install
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          bun_config_arch: ${{ matrix.bun_config_arch }}
       - name: build client and move execute file
         run: |
           bun run build
