@@ -72,7 +72,6 @@
     "pretest": "bun run compile && bun run lint",
     "test": "node ./out/test/runTest.js",
     "build": "npx ts-node esbuild.ts --production",
-    "debugbuild": "npx ts-node esbuild.ts --watch",
     "package": "vsce package --no-dependencies",
     "publish": "vsce publish --no-dependencies"
   },

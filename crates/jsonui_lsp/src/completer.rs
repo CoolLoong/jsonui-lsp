@@ -330,7 +330,7 @@ impl Completer {
     pub(crate) async fn goto_definition(
         &self,
         params: GotoDefinitionParams,
-    ) -> Option<GotoDefinitionResponse> {
+    ) -> Option<(GotoDefinitionResponse,bool)> {
         let url = &params.text_document_position_params.text_document.uri;
         let pos = params.text_document_position_params.position;
         let hash_url = &hash_url(url);
@@ -364,11 +364,13 @@ impl Completer {
                 Some(containing_symbols[0])
             }?;
             let symbol = symbol.to_owned();
-            trace!("try find_definition");
+            let current_np = parser_ref.namespace();
+            let symbol_np = symbol.id().2.clone()?.0;
+            let is_current_file = current_np == symbol_np;
             drop(parser_ref);
             drop(symbol_table);
             let loc = self.find_definition(symbol.deref()).await?;
-            Some(GotoDefinitionResponse::Scalar(loc))
+            Some((GotoDefinitionResponse::Scalar(loc), is_current_file))
         } else {
             None
         }
@@ -428,14 +430,24 @@ impl Completer {
 
     pub(crate) async fn did_open(&self, url: &Url, content: &str) {
         let hash_url = hash_url(url);
+        let mut new_parser: bool = false;
         let parser = self.parsers.entry(hash_url).or_insert_with(|| {
-            trace!("Init parser, url({}) hash_url({})", url, hash_url);
+            new_parser = true;
             DocumentParser::new(hash_url, &content)
         });
-        self.namespace_to_url
-            .entry(parser.namespace())
-            .or_insert(url.clone());
-        self.index_document(&parser);
+        let namespace = parser.namespace();
+        if namespace.deref() == "Unknown" {
+            drop(parser);
+            self.parsers.remove(&hash_url);
+        } else {
+            if new_parser {
+                trace!("Init parser, url({}) hash_url({})", url, hash_url);
+            }
+            self.namespace_to_url
+                .entry(parser.namespace())
+                .or_insert(url.clone());
+            self.index_document(&parser);
+        }
     }
 
     pub(crate) fn did_close(&self, url: &Url) {
@@ -909,7 +921,7 @@ impl Completer {
         }
         drop(parser_ref);
         drop(symbol_table);
-        
+
         // Process completions
         let completions = values
             .into_iter()
@@ -1053,9 +1065,7 @@ impl Completer {
     }
 
     async fn get_all_kv(&self, refer: &(Arc<str>, Arc<str>)) -> Option<BfastHashMap<String, Value>> {
-        let url = {
-            self.namespace_to_url.get(&refer.0)?.clone()
-        };
+        let url = { self.namespace_to_url.get(&refer.0)?.clone() };
         self.get_or_create_parser(&url, |parser| {
             let json_def = parser.hashmap();
             Some(json_def)

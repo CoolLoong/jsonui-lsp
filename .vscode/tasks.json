@@ -6,10 +6,10 @@
     {
       "label": "build",
       "type": "shell",
-      "command": "npm",
+      "command": "bun",
       "args": [
         "run",
-        "debugbuild"
+        "build"
       ],
       "group": "build",
       "presentation": {
@@ -18,11 +18,11 @@
         "close": true
       },
       "problemMatcher": [
-        "$tsc-watch"
+        "$tsc"
       ]
     },
     {
-      "label": "cargo build",
+      "label": "cargobuild",
       "type": "shell",
       "command": "cargo build",
       "group": "build",
@@ -39,13 +39,14 @@
       "label": "buildall",
       "dependsOn": [
         "build",
-        "cargo build"
+        "cargobuild"
       ],
       "group": "build",
       "presentation": {
         "panel": "dedicated",
         "reveal": "never"
-      }
+      },
+      "dependsOrder": "sequence"
     }
   ]
 }

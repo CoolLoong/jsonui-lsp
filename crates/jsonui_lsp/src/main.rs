@@ -191,9 +191,15 @@ impl LanguageServer for Backend {
         params: GotoDefinitionParams,
     ) -> tower_lsp::jsonrpc::Result<Option<GotoDefinitionResponse>> {
         let r = self.completer.goto_definition(params).await;
-        self.ignore_semaphore
-            .store(GotoDefSequence::ExpectFirstOpen as u8, Ordering::SeqCst);
-        Ok(r)
+        if let Some((r, is_current_file)) = r {
+            if !is_current_file {
+                self.ignore_semaphore
+                    .store(GotoDefSequence::ExpectFirstOpen as u8, Ordering::SeqCst);
+            }
+            Ok(Some(r))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn references(
