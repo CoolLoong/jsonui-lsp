@@ -1,6 +1,5 @@
 #![feature(let_chains)]
 
-mod complete_helper;
 mod completer;
 mod file_queue;
 mod museair;
@@ -15,7 +14,7 @@ pub(crate) mod towerlsp {
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -34,6 +33,9 @@ use crate::museair::BfastHashMap;
 
 const VANILLA_PACK_DEFINE: &str = include_str!("resources/vanillapack_define_1.21.70.3.json");
 const JSONUI_DEFINE: &str = include_str!("resources/jsonui_define.json");
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
 
 pub(crate) struct Config {
     log:           Arc<LoggerHandle>,
@@ -207,7 +209,6 @@ impl LanguageServer for Backend {
         params: ReferenceParams,
     ) -> tower_lsp::jsonrpc::Result<Option<Vec<Location>>> {
         let r = self.completer.references(&params).await;
-        trace!("goto references {:?}", r);
         Ok(r)
     }
 
@@ -493,6 +494,9 @@ pub(crate) fn load_completer() -> Arc<Completer> {
 
 #[tokio::main]
 async fn main() {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
     let log = Logger::with(LogSpecification::info()).start().unwrap();

@@ -141,13 +141,33 @@ impl DocumentParser {
     }
 
     fn is_pair_with_object(&self, node: &Node) -> bool {
-        node.named_children(&mut node.walk())
-            .any(|node| node.kind() == "object")
+        node.named_children(&mut node.walk()).any(|node| {
+            let r: bool = node.kind() == "object";
+            if r {
+                return true;
+            } else {
+                let child0 = node.child(0);
+                let child1 = node.child(1);
+                node.kind() == "ERROR"
+                    && (child0.is_some() && child0.unwrap().kind() == "{"
+                        || child1.is_some() && child1.unwrap().kind() == "{")
+            }
+        })
     }
 
     fn is_pair_with_object_or_array(&self, node: &Node) -> bool {
-        node.named_children(&mut node.walk())
-            .any(|node| node.kind() == "object" || node.kind() == "array")
+        node.named_children(&mut node.walk()).any(|node| {
+            let r: bool = node.kind() == "object" || node.kind() == "array";
+            if r {
+                return true;
+            } else {
+                let child0 = node.child(0);
+                let child1 = node.child(1);
+                node.kind() == "ERROR"
+                    && ((child0.is_some() && matches!(child0.unwrap().kind(), "{" | "["))
+                        || (child1.is_some() && matches!(child1.unwrap().kind(), "{" | "[")))
+            }
+        })
     }
 
     fn flatten_nodes(tree: &Tree) -> Vec<Node> {
@@ -523,7 +543,7 @@ impl DocumentParser {
             FALSE => Some(Value::Boolean(false)),
             NULL => Some(Value::Null),
             ARRAY => {
-                let mut array = Vec::new();
+                let mut array = Vec::with_capacity(node.named_child_count());
                 let mut cursor = node.walk();
                 for child in node.named_children(&mut cursor) {
                     if let Some(value) = self.parse_value(child) {
@@ -533,7 +553,7 @@ impl DocumentParser {
                 Some(Value::Array(array))
             }
             OBJECT => {
-                let mut map = HashMap::new();
+                let mut map = HashMap::with_capacity(node.child_count());
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
                     if let Some((key, value)) = self.parse_key_value_pair(child) {

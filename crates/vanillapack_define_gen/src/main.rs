@@ -31,7 +31,7 @@ fn main() -> io::Result<()> {
     for entry in WalkDir::new(path)
         .into_iter()
         .filter_map(Result::ok)
-        .filter(|e| e.path().extension().map_or(false, |ext| ext == "json"))
+        .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
         .filter(|e| !e.path().ends_with("_global_variables.json"))
         .filter(|e| !e.path().ends_with("_ui_defs.json"))
     {

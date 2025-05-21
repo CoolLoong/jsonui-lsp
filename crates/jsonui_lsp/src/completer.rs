@@ -212,13 +212,15 @@ impl Completer {
             node
         } else {
             trace!("cant find node for {:?}", &pos);
-            trace!("{:?}", &parser_ref);
+            trace!("{:?}", *parser_ref);
             return None;
         };
         let quote_pos = Self::get_position_for_quote(&node);
         let parent = parser_ref.get_parent_pair_node(&node);
         // Early return for document nodes
         if parent.kind() == "document" {
+            trace!("parent is document node, skip.");
+            trace!("{:?}", *parser_ref);
             return None;
         }
         let (lang, append_suffix) = if let Ok(config) = lang.try_lock() {
@@ -227,14 +229,14 @@ impl Completer {
             trace!("cant find client lang and settings!");
             return None;
         };
-        let parents = parser_ref.get_parents(&node);
         let char = params.context.as_ref()?.trigger_character.as_ref()?;
+        let parents = parser_ref.get_parents(&node);
         let p1 = parents.first()?;
         let (before, after) = parser_ref.get_adjacent_nodes(&node);
         let [n1, n2] = [before.first(), before.get(1)];
         let [n3, n4] = [after.first(), after.get(1)];
         trace!(
-            "|n1 {}| |n2 {}| |current {}| |n3 {}| |n4 {}| |p1 {}| char '{:?}'",
+            "|n1 {}| |n2 {}| |current {}| |n3 {}| |n4 {}| |p1 {}| |char '{:?}'|",
             n1.map_or("None".to_string(), |f| parser_ref.print_node(f)),
             n2.map_or("None".to_string(), |f| parser_ref.print_node(f)),
             parser_ref.print_node(&node),
@@ -295,7 +297,9 @@ impl Completer {
             }
         };
         drop(parser_ref);
-        trace!("completion_type {}", completion_type);
+        if completion_type != 255 {
+            trace!("completion_type {}", completion_type);
+        }
         match completion_type {
             0 => {
                 self.create_common_type_completion(url, pos, quote_pos, lang.clone())
@@ -330,7 +334,7 @@ impl Completer {
     pub(crate) async fn goto_definition(
         &self,
         params: GotoDefinitionParams,
-    ) -> Option<(GotoDefinitionResponse,bool)> {
+    ) -> Option<(GotoDefinitionResponse, bool)> {
         let url = &params.text_document_position_params.text_document.uri;
         let pos = params.text_document_position_params.position;
         let hash_url = &hash_url(url);
@@ -354,6 +358,7 @@ impl Completer {
                 })
                 .collect();
             let symbol = if containing_symbols.is_empty() {
+                trace!("cant find symbol for current node.");
                 None
             } else {
                 containing_symbols.sort_by(|a, b| {
@@ -526,12 +531,14 @@ impl Completer {
                 let control_name = c.id.1.clone();
                 self.references
                     .iter()
+                    .filter(|f| matches!(f.deref().deref(), Symbol::Control(_)))
                     .filter_map(|f| {
                         let target = f.id();
                         if let Some(extend) = target.2 {
                             if extend.0 == namespace && extend.1 == control_name {
                                 let url = self.get_url(target.0);
                                 if let Some(url) = url {
+                                    trace!("{:?} | {:?}", c, extend);
                                     Some(Location {
                                         uri:   url,
                                         range: f.range().into(),
@@ -727,8 +734,9 @@ impl Completer {
     }
 
     fn is_pair_array(&self, node: &Node) -> bool {
-        node.named_children(&mut node.walk())
-            .any(|node| node.kind() == ARRAY)
+        let n1 = node.child(1);
+        let n2 = node.child(2);
+        n1.is_some() && n1.unwrap().kind() == ":" && n2.is_some() && n2.unwrap().kind() == ARRAY
     }
 
     fn is_binding(&self, parser: &DocumentParser, node: &Node) -> bool {
@@ -956,6 +964,7 @@ impl Completer {
                         f == InsertTextFormat::SNIPPET
                     )
                 {
+                    trace!("Skip specific formats if not after colon");
                     return None;
                 }
 
@@ -1089,7 +1098,6 @@ impl Completer {
             Ok(p) => p,
             Err(_) => {
                 trace!("Failed to convert URL to file path: {}", url);
-                // 如果需要更详细的信息，你可以检查URL的格式
                 trace!("URL scheme: {}, host: {:?}, path: {}", url.scheme(), url.host(), url.path());
                 return None;
             }
@@ -1099,11 +1107,9 @@ impl Completer {
             Ok(content) => content,
             Err(e) => {
                 trace!("Failed to read file at path: {}, error: {}", path.display(), e);
-                // 检查文件是否存在
                 if !path.exists() {
                     trace!("File does not exist: {}", path.display());
                 } else {
-                    // 检查文件权限
                     match tokio::fs::metadata(&path).await {
                         Ok(metadata) => {
                             trace!(
@@ -1120,8 +1126,6 @@ impl Completer {
                 return None;
             }
         };
-        // let path = url.to_file_path().ok()?;
-        // let content = tokio::fs::read_to_string(path).await.ok()?;
         self.did_open(url, &content).await;
         if let Some(parser) = self.parsers.get(&hash_url) {
             trace!("create completed");
@@ -1460,22 +1464,42 @@ impl Completer {
 }
 
 fn split_control_name(name: String, def_namespace: Arc<str>) -> Option<ControlId> {
+    let pool = StringPool::global();
     let default_namespace = def_namespace;
     let parts: Vec<&str> = name.split('@').collect();
     match parts.len() {
         2 => {
             let split_result: Vec<&str> = parts[1].split('.').collect();
             Some(match split_result.as_slice() {
-                [a, b] => (default_namespace, Arc::from(parts[0]), Some((Arc::from(*a), Arc::from(*b)))),
-                [a] => (
-                    default_namespace.clone(),
-                    Arc::from(parts[0]),
-                    Some((default_namespace, Arc::from(*a))),
-                ),
-                _ => (default_namespace, Arc::from(parts[0]), None),
+                [a, b] => {
+                    let namespace = pool.get_or_intern(a);
+                    let control_name = pool.get_or_intern(b);
+                    let part0 = pool.get_or_intern(parts[0]);
+                    (
+                        default_namespace,
+                        pool.resolve_to_arc(&part0),
+                        Some((pool.resolve_to_arc(&namespace), pool.resolve_to_arc(&control_name))),
+                    )
+                }
+                [a] => {
+                    let namespace = pool.get_or_intern(a);
+                    let part0 = pool.get_or_intern(parts[0]);
+                    (
+                        default_namespace.clone(),
+                        pool.resolve_to_arc(&part0),
+                        Some((default_namespace, pool.resolve_to_arc(&namespace))),
+                    )
+                }
+                _ => {
+                    let part0 = pool.get_or_intern(parts[0]);
+                    (default_namespace, pool.resolve_to_arc(&part0), None)
+                }
             })
         }
-        1 => Some((default_namespace, Arc::from(parts[0]), None)),
+        1 => {
+            let part0 = pool.get_or_intern(parts[0]);
+            Some((default_namespace, pool.resolve_to_arc(&part0), None))
+        }
         _ => None,
     }
 }
