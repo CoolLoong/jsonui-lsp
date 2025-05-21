@@ -34,9 +34,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Bun
-        run: curl -fsSL https://bun.sh/install | bash
-      - name: Set up Node.js (for compatibility)
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Set up Node.js
         uses: actions/setup-node@v2
         with:
           node-version: 20.17.0
@@ -81,14 +82,19 @@ jobs:
     if: success() && startsWith( github.ref, 'refs/tags/')
     steps:
       - uses: actions/download-artifact@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: 20.17.0
       - run: |
+          npm i -g @vscode/vsce
           echo "Checking commit message for '-pre'..."
           if [[ "${{ github.event.head_commit.message }}" == *"-pre"* ]]; then
             echo "Publishing pre-release version..."
-            bun run vsce publish --pre-release --packagePath $(find . -iname *.vsix) --no-dependencies
+            vsce publish --pre-release --packagePath $(find . -iname *.vsix) --no-dependencies
           else
             echo "Publishing stable version..."
-            bun run vsce publish --packagePath $(find . -iname *.vsix) --no-dependencies
+            vsce publish --packagePath $(find . -iname *.vsix) --no-dependencies
           fi
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}

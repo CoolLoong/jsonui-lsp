@@ -1,13 +1,13 @@
 # Change Log
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
-## [0.2.0] - 2025-04-15
+## [0.2.0] - 2025-05-21
 
 ### Changed
 - Major project refactoring with significant improvements in code performance and memory usage
 - Replaced built-in parser with `Tree-sitter` parser
 - Use `Rope` for document caching instead of built-in Document cache
-- Updated UI definitions for Bedrock Edition 1.21.70
+- Updated UI definitions for Bedrock Edition 1.21.80
 
 ### Added
 - Implemented reference lookup feature for control name

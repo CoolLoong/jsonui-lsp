@@ -10,7 +10,7 @@ use jsonc_parser::parse_to_serde_value;
 use serde_json::{json, Value};
 use walkdir::WalkDir;
 
-const VERSION: &str = "1.21.70.3";
+const VERSION: &str = "1.21.80.3";
 
 fn main() -> io::Result<()> {
     let namespace_map: Rc<RefCell<HashMap<String, Value>>> = Rc::new(RefCell::new(HashMap::new()));

@@ -31,7 +31,7 @@ use walkdir::WalkDir;
 use crate::completer::VanillaControlDefine;
 use crate::museair::BfastHashMap;
 
-const VANILLA_PACK_DEFINE: &str = include_str!("resources/vanillapack_define_1.21.70.3.json");
+const VANILLA_PACK_DEFINE: &str = include_str!("resources/vanillapack_define_1.21.80.3.json");
 const JSONUI_DEFINE: &str = include_str!("resources/jsonui_define.json");
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
