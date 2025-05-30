@@ -1,6 +1,13 @@
 # Change Log
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.2.1] - 2025-05-30
+
+### Changed
+- Fix incorrect target location in goto definition
+- Fix navigating for controls with extends controls
+- Fix completion for newly created UI files
+
 ## [0.2.0] - 2025-05-21
 
 ### Changed
