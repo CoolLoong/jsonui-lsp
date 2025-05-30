@@ -429,7 +429,10 @@ impl Completer {
             for change in changes {
                 parser.edit(change);
             }
-            self.index_document(&parser);
+            let namespace = parser.namespace();
+            if namespace.deref() != "Unknown" {
+                self.index_document(&parser);
+            }
         }
     }
 
@@ -441,10 +444,7 @@ impl Completer {
             DocumentParser::new(hash_url, &content)
         });
         let namespace = parser.namespace();
-        if namespace.deref() == "Unknown" {
-            drop(parser);
-            self.parsers.remove(&hash_url);
-        } else {
+        if namespace.deref() != "Unknown" {
             if new_parser {
                 trace!("Init parser, url({}) hash_url({})", url, hash_url);
             }
@@ -481,15 +481,19 @@ impl Completer {
         let o_url = hash_url(&o_url);
         let n_url = hash_url(&new_url);
         if let Some((_, mut parser)) = self.parsers.remove(&o_url) {
-            // update namespace_to_url
-            if let Some((k, _)) = self.namespace_to_url.remove(&parser.namespace()) {
-                self.namespace_to_url.insert(k, new_url);
+            let namespace = parser.namespace();
+            if namespace.deref() != "Unknown" {
+                // update namespace_to_url
+                if let Some((k, _)) = self.namespace_to_url.remove(&parser.namespace()) {
+                    self.namespace_to_url.insert(k, new_url);
+                }
+                parser.url = n_url;
+                self.parsers.insert(n_url, parser);
+
+                if let Some((_, symbols)) = self.symbol_table.remove(&o_url) {
+                    self.symbol_table.insert(n_url, symbols);
+                }
             }
-            parser.url = n_url;
-            self.parsers.insert(n_url, parser);
-        }
-        if let Some((_, symbols)) = self.symbol_table.remove(&o_url) {
-            self.symbol_table.insert(n_url, symbols);
         }
     }
 
@@ -502,6 +506,7 @@ impl Completer {
 
                 self.definitions
                     .iter()
+                    .filter(|f| matches!(f.deref().deref(), Symbol::Control(_)))
                     .filter_map(|f| {
                         let target = f.id();
                         if target.0 == extend.0 && target.1 == extend.1 {
@@ -1372,14 +1377,14 @@ impl Completer {
         if Self::is_control_key(node) {
             // for the control node, the first parent its own pair node, so it needs to query again
             let parent_parent = Self::get_parent_control_name(parser, &parent_node);
-            let id = split_control_name(string_content, parser.namespace())?;
+            let id: ControlId = split_control_name(string_content, parser.namespace())?;
             let range = Self::node_range(&node);
             let symbol = Arc::new(Symbol::Control(Control {
                 id: id.clone(),
                 range,
                 parent: parent_parent.clone(),
             }));
-            let metadata = if id.2.is_none() && parent_parent.is_none() {
+            let metadata = if parent_parent.is_none() {
                 MetaData { is_declare: true }
             } else {
                 MetaData { is_declare: false }

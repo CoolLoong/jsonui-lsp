@@ -85,15 +85,18 @@ impl DocumentParser {
             .root_node()
             .named_children(&mut tree.root_node().walk())
             .find(|node| node.kind() == "object");
+
         let namespace = if let Some(object) = object {
             Self::find_namespace_value(object, text)
         } else {
             None
         };
-        let namespace = namespace.map_or(Arc::from("Unknown"), |f| Arc::from(f.as_str()));
+        let pool = StringPool::global();
+        let namespace = pool.get_or_intern(namespace.unwrap_or("Unknown".to_string()).as_str());
+
         DocumentParser {
             url,
-            namespace,
+            namespace: pool.resolve_to_arc(&namespace),
             rope,
             tree,
         }
@@ -428,10 +431,11 @@ impl DocumentParser {
                 p.parse_with_options(&mut callback, Some(&self.tree), None)
                     .unwrap()
             });
+
             let namespace = self.find_namespace_value_byself();
-            if let Some(namespace) = namespace {
-                let pool = StringPool::global();
-            }
+            let pool = StringPool::global();
+            let namespace = pool.get_or_intern(namespace.unwrap_or("Unknown".to_string()).as_str());
+            self.namespace = pool.resolve_to_arc(&namespace);
         }
     }
 
