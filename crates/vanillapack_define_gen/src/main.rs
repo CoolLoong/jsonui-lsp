@@ -147,8 +147,8 @@ fn handle_namespace(
         } else {
             (namespace.as_ref(), parts_namespace[0])
         };
-        if let Some(namespace_object) = namespace_map.get(np) {
-            if let Some(ns_properties) = namespace_object.as_object() {
+        if let Some(namespace_object) = namespace_map.get(np)
+            && let Some(ns_properties) = namespace_object.as_object() {
                 for (kk, v) in ns_properties {
                     if extract_prefix(kk) == cn {
                         let next_name = name.or(Some(parts[0]));
@@ -165,7 +165,6 @@ fn handle_namespace(
                     }
                 }
             }
-        }
     }
 }
 

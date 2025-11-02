@@ -5,8 +5,7 @@ use jsonui_lsp::document_manager::{DocumentManager, OpenRequest};
 use jsonui_lsp::load_vanilla_controls_table;
 use jsonui_lsp::museair::BfastHashMap;
 use jsonui_lsp::navigation_state::NavigationStateManager;
-use jsonui_lsp::parser::{DocumentParser, Value};
-use jsonui_lsp::utils;
+use jsonui_lsp::parser::DocumentParser;
 
 pub(crate) mod towerlsp {
     pub(crate) use tower_lsp::lsp_types::notification::*;
@@ -27,7 +26,6 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use walkdir::WalkDir;
 
-const VANILLA_PACK_DEFINE: &str = include_str!("../resources/vanillapack_define_1.21.110.2.json");
 const JSONUI_DEFINE: &str = include_str!("../resources/jsonui_define.json");
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
@@ -299,12 +297,11 @@ impl LanguageServer for Backend {
 
     async fn did_create_files(&self, params: CreateFilesParams) {
         for i in params.files.iter() {
-            if let Ok(url) = Url::parse(&i.uri) {
-                if let Ok(content) = tokio::fs::read_to_string(url.path()).await {
+            if let Ok(url) = Url::parse(&i.uri)
+                && let Ok(content) = tokio::fs::read_to_string(url.path()).await {
                     self.document_manager
                         .request_open(OpenRequest::Content(url, content));
                 }
-            }
         }
     }
 
@@ -355,7 +352,7 @@ impl Backend {
         let json_files: Vec<_> = WalkDir::new(&workspace_folders)
             .into_iter()
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().map_or(false, |ext| ext == "json"))
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
             .collect();
         let total_files = json_files.len();
         if total_files == 0 {
@@ -409,12 +406,11 @@ impl Backend {
                     // Read and canonicalize file path
                     match tokio::fs::read_to_string(&path).await {
                         Ok(content) => {
-                            if let Ok(abs_path) = tokio::fs::canonicalize(&path).await {
-                                if let Ok(url) = Url::from_file_path(abs_path) {
+                            if let Ok(abs_path) = tokio::fs::canonicalize(&path).await
+                                && let Ok(url) = Url::from_file_path(abs_path) {
                                     // Index document (this awaits completion)
                                     completer.did_open(&url, &content).await;
                                 }
-                            }
                         }
                         Err(e) => {
                             trace!("Failed to read file {:?}: {}", path, e);
@@ -515,21 +511,4 @@ async fn main() {
     .finish();
     info!("starting jsonui_lsp...");
     Server::new(stdin, stdout, socket).serve(service).await;
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    pub(crate) fn setup_logger() {
-        #[cfg(feature = "debug")]
-        {
-            use tracing_subscriber::{EnvFilter, fmt};
-
-            let _ = fmt()
-                .with_env_filter(EnvFilter::new("trace"))
-                .with_target(true)
-                .with_test_writer()
-                .try_init();
-        }
-    }
 }
