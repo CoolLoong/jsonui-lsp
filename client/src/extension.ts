@@ -14,7 +14,6 @@ import * as path from 'path';
 let client: LanguageClient;
 export async function activate(context: ExtensionContext) {
   console.info("jsonui-support client start!");
-  // backend path
   const command = process.env.SERVER_PATH || path.join(context.extensionPath, 'dist', 'jsonui_lsp');
   const run: Executable = {
     command,

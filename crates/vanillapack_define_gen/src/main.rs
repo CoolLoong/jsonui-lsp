@@ -10,7 +10,7 @@ use jsonc_parser::parse_to_serde_value;
 use serde_json::{json, Value};
 use walkdir::WalkDir;
 
-const VERSION: &str = "1.21.80.3";
+const VERSION: &str = "1.21.110.2";
 
 fn main() -> io::Result<()> {
     let namespace_map: Rc<RefCell<HashMap<String, Value>>> = Rc::new(RefCell::new(HashMap::new()));
@@ -47,7 +47,7 @@ fn main() -> io::Result<()> {
         result.insert(k.clone(), export_map);
     }
 
-    let output_path = format!("crates/jsonui_lsp/src/resources/vanillapack_define_{}.json", VERSION);
+    let output_path = format!("crates/jsonui_lsp/resources/vanillapack_define_{}.json", VERSION);
     let output_dir = Path::new(output_path.as_str()).parent().unwrap();
     if !output_dir.exists() {
         fs::create_dir_all(output_dir)?;

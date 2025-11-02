@@ -8,7 +8,6 @@ use tree_sitter::{InputEdit, Node, Parser, Point, Tree};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::museair::BfastHashMap;
-use crate::StringPool;
 
 pub(crate) const OBJECT: &'static str = "object";
 pub(crate) const NUMBER: &'static str = "number";
@@ -43,8 +42,8 @@ pub enum Value {
 
 #[derive(Clone)]
 pub struct DocumentParser {
-    namespace:       Arc<str>,
-    pub(crate) url:  u64,
+    namespace: Arc<str>,
+    pub(crate) url: u64,
     pub(crate) rope: Rope,
     pub(crate) tree: Tree,
 }
@@ -66,11 +65,11 @@ impl fmt::Debug for DocumentParser {
 }
 
 impl DocumentParser {
-    pub(crate) fn default(text: &str) -> Self {
+    pub fn default(text: &str) -> Self {
         DocumentParser::new(0, text)
     }
 
-    pub(crate) fn new(url: u64, text: &str) -> Self {
+    pub fn new(url: u64, text: &str) -> Self {
         let rope = Rope::from_str(text);
         let mut callback = |byte_offset: usize, _: Point| -> &[u8] {
             if byte_offset >= rope.len_bytes() {
@@ -85,18 +84,16 @@ impl DocumentParser {
             .root_node()
             .named_children(&mut tree.root_node().walk())
             .find(|node| node.kind() == "object");
-
         let namespace = if let Some(object) = object {
             Self::find_namespace_value(object, text)
         } else {
             None
         };
-        let pool = StringPool::global();
-        let namespace = pool.get_or_intern(namespace.unwrap_or("Unknown".to_string()).as_str());
+        let namespace = Arc::from(namespace.unwrap_or("Unknown".to_string()).as_str());
 
         DocumentParser {
             url,
-            namespace: pool.resolve_to_arc(&namespace),
+            namespace,
             rope,
             tree,
         }
@@ -226,24 +223,28 @@ impl DocumentParser {
     pub fn text(&self, node: Node) -> Option<String> {
         let start_byte = node.start_byte();
         let end_byte = node.end_byte();
-
         if end_byte > self.rope.len_bytes() {
             return None;
         }
-
-        let start_char = self.rope.byte_to_char(start_byte);
-        let end_char = self.rope.byte_to_char(end_byte);
-
-        Some(self.rope.slice(start_char..end_char).to_string())
+        Some(self.rope.byte_slice(start_byte..end_byte).to_string())
     }
 
     pub fn string(&self, node: Node) -> Option<String> {
         match node.kind() {
-            STRING => self.text(node).map(|s| {
-                let str = &s[1..s.len() - 1];
-                unescape_zero_copy::unescape_default(str).map_or(str.to_string(), |f| f.to_string())
-            }),
-            STRING_CONTENT => self.text(node).map(|s| s.to_string()),
+            STRING => {
+                let text = self.text(node)?;
+                if text.len() < 2 {
+                    return Some(String::new());
+                }
+                let str = &text[1..text.len() - 1];
+                if !str.contains('\\') {
+                    return Some(str.to_string());
+                }
+                Some(
+                    unescape_zero_copy::unescape_default(str).map_or(str.to_string(), |f| f.to_string()),
+                )
+            }
+            STRING_CONTENT => self.text(node),
             _ => None,
         }
     }
@@ -433,9 +434,7 @@ impl DocumentParser {
             });
 
             let namespace = self.find_namespace_value_byself();
-            let pool = StringPool::global();
-            let namespace = pool.get_or_intern(namespace.unwrap_or("Unknown".to_string()).as_str());
-            self.namespace = pool.resolve_to_arc(&namespace);
+            self.namespace = Arc::from(namespace.unwrap_or("Unknown".to_string()).as_str());
         }
     }
 
@@ -471,10 +470,10 @@ impl DocumentParser {
                 let old_len = self.rope.len_bytes();
                 let text = change.text.as_str();
                 Some(InputEdit {
-                    start_byte:       0,
-                    old_end_byte:     old_len,
-                    new_end_byte:     Self::utf8_byte_len(text),
-                    start_position:   Point { row: 0, column: 0 },
+                    start_byte: 0,
+                    old_end_byte: old_len,
+                    new_end_byte: Self::utf8_byte_len(text),
+                    start_position: Point { row: 0, column: 0 },
                     old_end_position: Self::compute_end_position(None, &self.rope.to_string()),
                     new_end_position: Self::compute_end_position(None, text),
                 })
@@ -488,11 +487,11 @@ impl DocumentParser {
                     old_end_byte,
                     new_end_byte: start_byte + Self::utf8_byte_len(text),
                     start_position: Point {
-                        row:    range.start.line as usize,
+                        row: range.start.line as usize,
                         column: range.start.character as usize,
                     },
                     old_end_position: Point {
-                        row:    range.end.line as usize,
+                        row: range.end.line as usize,
                         column: range.end.character as usize,
                     },
                     new_end_position: Self::compute_end_position(Some(range.start), text),
@@ -557,7 +556,7 @@ impl DocumentParser {
                 Some(Value::Array(array))
             }
             OBJECT => {
-                let mut map = HashMap::with_capacity(node.child_count());
+                let mut map = HashMap::with_capacity(node.named_child_count());
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
                     if let Some((key, value)) = self.parse_key_value_pair(child) {
@@ -731,11 +730,7 @@ pub(crate) fn to_array_ref(value: &Value) -> Vec<Value> {
 }
 
 pub(crate) fn to_number(value: Value) -> f64 {
-    if let Value::Number(v) = value {
-        v
-    } else {
-        0 as f64
-    }
+    if let Value::Number(v) = value { v } else { 0 as f64 }
 }
 
 pub(crate) fn to_number_ref(value: &Value) -> f64 {
@@ -749,9 +744,9 @@ pub(crate) fn to_number_ref(value: &Value) -> f64 {
 #[allow(unused_imports)]
 pub(crate) mod prelude {
     pub(crate) use super::{
+        ARRAY, DocumentParser, FALSE, NULL, NUMBER, OBJECT, STRING, STRING_CONTENT, TRUE, Value,
         to_array, to_array_ref, to_number, to_number_ref, to_object, to_object_ref, to_string,
-        to_string_ref, DocumentParser, Value, ARRAY, FALSE, NULL, NUMBER, OBJECT, STRING,
-        STRING_CONTENT, TRUE,
+        to_string_ref,
     };
 }
 
@@ -951,7 +946,7 @@ mod tests {
     }"#;
 
         let position = Position {
-            line:      5,
+            line: 5,
             character: 20,
         };
         let parser = DocumentParser::default(json);
@@ -978,7 +973,7 @@ mod tests {
     }
 }"#;
         let position = Position {
-            line:      7,
+            line: 7,
             character: 12,
         };
         let parser = DocumentParser::default(json);
@@ -1008,11 +1003,11 @@ mod tests {
         }
     }"#;
         let pos1 = Position {
-            line:      3,
+            line: 3,
             character: 16,
         };
         let pos2 = Position {
-            line:      7,
+            line: 7,
             character: 33,
         };
         let parser = DocumentParser::default(json);
@@ -1040,7 +1035,7 @@ mod tests {
         }
     }"#;
         let pos1 = Position {
-            line:      2,
+            line: 2,
             character: 7,
         };
         let parser = DocumentParser::default(json);
@@ -1063,9 +1058,9 @@ mod tests {
         let parser = DocumentParser::default(json);
         let r = parser.root();
         let t1 = parser.get_field(&r.unwrap(), "t1");
-        assert!(parser.string(t1.unwrap()).unwrap().contains(r#"\"xxx\""#));
+        assert_eq!(parser.get_string(&t1.unwrap()).unwrap(), r#""xxx""#);
         let t2 = parser.get_field(&r.unwrap(), "t2");
-        assert!(parser.string(t2.unwrap()).unwrap().contains(r#""#));
+        assert_eq!(parser.get_string(&t2.unwrap()).unwrap(), "");
     }
 
     #[test]

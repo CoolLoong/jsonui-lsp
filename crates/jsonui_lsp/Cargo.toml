@@ -1,11 +1,19 @@
 [package]
 name = "jsonui_lsp"
 version = "0.0.1"
-edition = "2021"
+edition = "2024"
 authors = ["CoolLoong"]
 description = "A jsonui language server for vscode."
 keywords = ["minecraft", "jsonui", "lsp", "vscode", "extension"]
 categories = ["development-tools"]
+
+[lib]
+name = "jsonui_lsp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "jsonui_lsp"
+path = "src/main.rs"
 
 [dependencies]
 tokio = { version = "1.45.0", features = [
@@ -16,21 +24,33 @@ tokio = { version = "1.45.0", features = [
     "rt-multi-thread",
 ] }
 tower-lsp = "0.20.0"
-log = "0.4.27"
-flexi_logger = "0.30.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 walkdir = "2.5.0"
-museair = "0.3.0"
+museair = "0.4.0"
 unicode-segmentation = "1.12.0"
 dashmap = "6.1.0"
-lasso = { version = "0.7.3", features = ["ahasher", "multi-threaded"] }
 tree-sitter-json = "0.24.8"
 tree-sitter = "0.25.4"
 ropey = "1.6.1"
 multimap = "0.10.1"
 unescape_zero_copy = "2.3.0"
-lru = "0.14.0"
+lru = "0.16"
 dhat = "0.3.3"
+arc-swap = "1.7"
+futures = "0.3"
+anyhow = "1.0"
+
+[dev-dependencies]
+tokio-test = "0.4"
+criterion = { version = "0.7", features = ["async_tokio"] }
+serde_json = "1.0"
+tempfile = "3.14"
 
 [features]
 debug = []
 dhat-heap = []
+
+[[bench]]
+name = "benchmarks"
+harness = false

@@ -5,6 +5,9 @@ members = ["crates/vanillapack_define_gen", "crates/jsonui_lsp"]
 [profile.dev]
 debug = true
 
+[profile.bench]
+debug = true
+
 [profile.release]
 opt-level = 3
 debug = false

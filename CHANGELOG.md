@@ -1,6 +1,28 @@
 # Change Log
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
+## [0.3.0] - 2025-11-02
+
+### Added
+- Added benchmark support for performance profiling
+- Added configuration management system
+- Added document manager for better file handling
+- Added navigation state management
+- Support for Minecraft Bedrock Edition 1.21.110
+
+### Changed
+- Major code refactoring for improved maintainability and performance
+  - Split completer module into multiple specialized submodules (completer, indexer, types)
+  - Reorganized resource files from `src/resources` to `resources` directory
+- Enhanced museair integration with improved error handling
+- Optimized parser with better tree-sitter integration
+- Improved utility functions for better code reusability
+
+### Removed
+- Removed deprecated `file_queue` module
+- Removed unused `stringpool` module
+- Removed test JSON files from crate directory
+
 ## [0.2.1] - 2025-05-30
 
 ### Changed
