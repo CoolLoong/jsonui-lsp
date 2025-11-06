@@ -14,7 +14,7 @@ use parser::Value;
 pub fn load_vanilla_controls_table()
 -> Arc<museair::BfastHashMap<(Arc<str>, Arc<str>), completer::types::VanillaControlDefine>>
 {
-    const VANILLA_PACK_DEFINE: &str = include_str!("../resources/vanillapack_define_1.21.110.2.json");
+    const VANILLA_PACK_DEFINE: &str = include_str!("../resources/vanillapack_define_1.21.120.4.json");
 
     let parser = DocumentParser::default(VANILLA_PACK_DEFINE);
 
