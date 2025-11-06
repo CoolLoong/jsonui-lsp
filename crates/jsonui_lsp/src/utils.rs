@@ -10,14 +10,12 @@ pub(crate) fn hash_url(url: &Url) -> u64 {
 
 fn normalize_url(url: &Url) -> String {
     let url_str = url.to_string();
-    if url_str.starts_with("file:///") {
-        if let Some(rest) = url_str.strip_prefix("file:///") {
-            if let Some((drive, path)) = rest.split_once('/') {
+    if url_str.starts_with("file:///")
+        && let Some(rest) = url_str.strip_prefix("file:///")
+            && let Some((drive, path)) = rest.split_once('/') {
                 let normalized_drive = drive.to_lowercase().replace("%3a", ":");
                 return format!("file:///{}/{}", normalized_drive, path);
             }
-        }
-    }
     url_str
 }
 

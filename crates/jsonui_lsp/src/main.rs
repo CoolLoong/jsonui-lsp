@@ -360,11 +360,10 @@ impl Backend {
     /// Check if a file URL is within the workspace
     /// Returns true if the file is in workspace, false if it's a standalone file
     fn is_in_workspace(&self, url: &Url) -> bool {
-        if let Some(workspace_root) = self.root_path.get() {
-            if let Ok(file_path) = url.to_file_path() {
+        if let Some(workspace_root) = self.root_path.get()
+            && let Ok(file_path) = url.to_file_path() {
                 return file_path.starts_with(workspace_root);
             }
-        }
         false
     }
 

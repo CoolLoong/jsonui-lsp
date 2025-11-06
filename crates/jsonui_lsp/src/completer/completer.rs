@@ -98,11 +98,11 @@ impl Completer {
         let completion_type: u8 = match char.as_str() {
             "\"" => {
                 if let Some(current_str) = parser_ref.get_string(&node)
-                    && current_str == ""
+                    && current_str.is_empty()
                 {
                     if self.is_pair_array(p1) {
                         if self.is_binding(&parser_ref, &node) {
-                            if n2.map_or(false, |n| n.kind() == ":") {
+                            if n2.is_some_and(|n| n.kind() == ":") {
                                 3 // binding value completion
                             } else {
                                 1 // binding type completion
@@ -111,7 +111,7 @@ impl Completer {
                             trace!("Error 5");
                             255
                         }
-                    } else if n2.map_or(false, |n| n.kind() == ":") {
+                    } else if n2.is_some_and(|n| n.kind() == ":") {
                         2 // common value completion
                     } else {
                         0 // common type completion
@@ -124,7 +124,7 @@ impl Completer {
             ":" => {
                 if self.is_pair_array(p1) {
                     if self.is_binding(&parser_ref, &node) {
-                        if n2.map_or(false, |n| self.is_string_node(n)) {
+                        if n2.is_some_and(|n| self.is_string_node(n)) {
                             3 // binding value completion
                         } else {
                             trace!("Error 4");
@@ -134,7 +134,7 @@ impl Completer {
                         trace!("Error 3");
                         255
                     }
-                } else if n2.map_or(false, |n| self.is_string_node(n)) {
+                } else if n2.is_some_and(|n| self.is_string_node(n)) {
                     2 // common value completion
                 } else {
                     trace!("Error 2");
@@ -178,7 +178,7 @@ impl Completer {
                 Symbol::Color(v) => Some(v),
                 _ => None,
             })
-            .map(|c| Self::create_color_information(c))
+            .map(Self::create_color_information)
             .collect();
         if colors.is_empty() { None } else { Some(colors) }
     }
@@ -472,9 +472,9 @@ impl Completer {
                     ColorInformation {
                         range: color.range.into(),
                         color: lsp_types::Color {
-                            red: f32::clamp(v[0] as f32, 0 as f32, 1 as f32),
-                            green: f32::clamp(v[1] as f32, 0 as f32, 1 as f32),
-                            blue: f32::clamp(v[2] as f32, 0 as f32, 1 as f32),
+                            red: f32::clamp(v[0] as f32, 0 as f32, 1_f32),
+                            green: f32::clamp(v[1] as f32, 0 as f32, 1_f32),
+                            blue: f32::clamp(v[2] as f32, 0 as f32, 1_f32),
                             alpha: 1.0,
                         },
                     }
@@ -482,10 +482,10 @@ impl Completer {
                     ColorInformation {
                         range: color.range.into(),
                         color: lsp_types::Color {
-                            red: f32::clamp(v[0] as f32, 0 as f32, 1 as f32),
-                            green: f32::clamp(v[1] as f32, 0 as f32, 1 as f32),
-                            blue: f32::clamp(v[2] as f32, 0 as f32, 1 as f32),
-                            alpha: f32::clamp(v[3] as f32, 0 as f32, 1 as f32),
+                            red: f32::clamp(v[0] as f32, 0 as f32, 1_f32),
+                            green: f32::clamp(v[1] as f32, 0 as f32, 1_f32),
+                            blue: f32::clamp(v[2] as f32, 0 as f32, 1_f32),
+                            alpha: f32::clamp(v[3] as f32, 0 as f32, 1_f32),
                         },
                     }
                 } else {
@@ -524,22 +524,20 @@ impl Completer {
             current = parent.parent();
         }
         current
-            .and_then(|p| Some(p))
             .and_then(|parent| (matches!(parent.kind(), OBJECT)).then(|| parent))
             .and_then(|parent| parent.parent())
-            .and_then(|pp| (pp.kind() == ARRAY).then(|| pp))
+            .and_then(|pp| (pp.kind() == ARRAY).then_some(pp))
             .and_then(|pp| pp.parent())
-            .and_then(|ppp| (ppp.kind() == "pair").then(|| ppp))
+            .and_then(|ppp| (ppp.kind() == "pair").then_some(ppp))
             .and_then(|ppp| ppp.named_child(0))
             .filter(|key| self.is_string_node(key))
             .and_then(|key| parser.string(key))
-            .map_or(false, |key| key == "bindings")
+            .is_some_and(|key| key == "bindings")
     }
 
     // Helper to extract string values from JSON array
     fn extract_strings(value: Option<&Value>) -> Vec<String> {
-        value
-            .and_then(|value| Some(to_array_ref(value)))
+        value.map(to_array_ref)
             .map(|v| v.into_iter().filter_map(|v| Some(to_string(v))).collect())
             .unwrap_or_default()
     }
@@ -569,27 +567,25 @@ impl Completer {
             if let Some(control_id) = control_id {
                 let type_n = if let Some(type_n) = type_n {
                     parser_ref.string(type_n).map(|s| Arc::from(s.as_str()))
+                } else if let Some(control_id_no_parent) = control_id.2 {
+                    drop(parser_ref);
+                    self.find_control_type(control_id_no_parent).await
                 } else {
-                    if let Some(control_id_no_parent) = control_id.2 {
-                        drop(parser_ref);
-                        self.find_control_type(control_id_no_parent).await
-                    } else {
-                        None
-                    }
+                    None
                 };
-                let type_key = if let Some(type_n) = type_n {
+                
+                if let Some(type_n) = type_n {
                     Self::extract_strings(self.jsonui_define.get(&type_n.to_string()))
                 } else {
                     Vec::with_capacity(0)
-                };
-                type_key
+                }
             } else {
                 Vec::with_capacity(0)
             }
         };
 
         let mut result = Vec::with_capacity(type_key.len() + common_key.len());
-        let mut order = 0 as usize;
+        let mut order = 0_usize;
         common_key.into_iter().for_each(|k| {
             result.push(self.create_simple_completion_item(k, lang, quote_pos, order));
             order += 1;
@@ -621,7 +617,7 @@ impl Completer {
         drop(parser_ref);
 
         let mut result = Vec::with_capacity(type_key.len() + common_key.len());
-        let mut order = 0 as usize;
+        let mut order = 0_usize;
         common_key.into_iter().for_each(|k| {
             result.push(self.create_simple_completion_item(k, lang, quote_pos, order));
             order += 1;
@@ -652,7 +648,7 @@ impl Completer {
         let pos = if completion_type == 2 { quote_pos } else { pos };
 
         // Determine current key
-        let current_is_colon = n2.map_or(false, |n| n.kind() != ":");
+        let current_is_colon = n2.is_some_and(|n| n.kind() != ":");
         let key_node = if current_is_colon { n2 } else { n1 };
         let key = key_node
             .and_then(|n| parser_ref.get_string(n))
@@ -665,10 +661,8 @@ impl Completer {
 
         // Process suffix
         let suffix = if append_suffix {
-            n3.filter(|n| n.kind() == ",")
-                .is_none()
-                .then_some(",")
-                .unwrap_or("")
+            if n3.filter(|n| n.kind() == ",")
+                .is_none() { "," } else { "" }
         } else {
             ""
         };
@@ -680,8 +674,8 @@ impl Completer {
             .unwrap_or_default();
 
         // Add variables
-        if let Some(key) = parent.named_child(0) {
-            if let Some(control_name) = parser_ref.string(key) {
+        if let Some(key) = parent.named_child(0)
+            && let Some(control_name) = parser_ref.string(key) {
                 let control_id = self
                     .indexer
                     .split_control_name(control_name, parser_ref.namespace());
@@ -691,7 +685,6 @@ impl Completer {
                     values.extend(variables.into_iter().map(Value::String));
                 }
             }
-        }
         drop(parser_ref);
         drop(symbol_table);
 
@@ -702,12 +695,11 @@ impl Completer {
             .filter_map(|(i, v)| {
                 let (insert_text_str, label, description, format, kind) = match v {
                     Value::Object(ref v) => (
-                        v.get("insert_text").and_then(|v| Some(to_string_ref(v))),
-                        v.get("label").and_then(|v| Some(to_string_ref(v))),
+                        v.get("insert_text").map(to_string_ref),
+                        v.get("label").map(to_string_ref),
                         v.get("description")
                             .and_then(|desc| to_object_ref(desc))
-                            .and_then(|desc| desc.get(lang.as_ref()).or(desc.get("en-us")))
-                            .and_then(|v| Some(to_string_ref(v)))
+                            .and_then(|desc| desc.get(lang.as_ref()).or(desc.get("en-us"))).map(to_string_ref)
                             .or(Some("jsonui-support")),
                         v.get("insert_text_format").and_then(|k| {
                             Self::from_number_to_insert_text_format(to_number_ref(k) as u64)
@@ -851,11 +843,10 @@ impl Completer {
         json_def: &BfastHashMap<String, Value>,
         control_n: &Arc<str>,
     ) -> Option<String> {
-        if let Some(Value::Object(props)) = json_def.get(control_n.as_ref()) {
-            if let Some(Value::String(type_n)) = props.get("type") {
+        if let Some(Value::Object(props)) = json_def.get(control_n.as_ref())
+            && let Some(Value::String(type_n)) = props.get("type") {
                 return Some(type_n.clone());
             }
-        }
         None
     }
 
@@ -872,11 +863,10 @@ impl Completer {
                     continue;
                 }
 
-                if let Value::Object(props) = value {
-                    if let Some(Value::String(type_)) = props.get("type") {
+                if let Value::Object(props) = value
+                    && let Some(Value::String(type_)) = props.get("type") {
                         return Ok(type_.clone());
                     }
-                }
 
                 if let Some(extend) = control_id.2 {
                     return Err(Some(extend));
@@ -944,7 +934,7 @@ impl Completer {
                 description
                     .get(lang.as_ref())
                     .or(description.get("en-us"))
-                    .map(|f| to_string_ref(f))
+                    .map(to_string_ref)
             } else {
                 Some("jsonui-support")
             }

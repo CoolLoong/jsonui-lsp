@@ -120,15 +120,14 @@ fn process_properties(
 fn update_export_map(export_map: &mut HashMap<String, serde_json::Value>, key: &str, variable: String) {
     if variable.starts_with("$") {
         let entry = export_map.entry(key.to_string()).or_insert_with(|| json!({}));
-        if let Value::Object(map) = entry {
-            if let Some(variables) = map
+        if let Value::Object(map) = entry
+            && let Some(variables) = map
                 .entry("variables")
                 .or_insert_with(|| json!([]))
                 .as_array_mut()
             {
                 variables.push(json!(variable));
             }
-        }
     }
 }
 

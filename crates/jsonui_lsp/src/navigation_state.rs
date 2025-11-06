@@ -7,7 +7,6 @@
 ///
 /// We need to ignore these automated lifecycle events since they're part
 /// of the navigation flow, not user-initiated file management.
-
 use std::sync::atomic::{AtomicU8, Ordering};
 
 /// States during a goto definition navigation

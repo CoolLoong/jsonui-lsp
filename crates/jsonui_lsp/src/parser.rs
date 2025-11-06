@@ -9,14 +9,14 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::museair::BfastHashMap;
 
-pub(crate) const OBJECT: &'static str = "object";
-pub(crate) const NUMBER: &'static str = "number";
-pub(crate) const STRING: &'static str = "string";
-pub(crate) const STRING_CONTENT: &'static str = "string_content";
-pub(crate) const TRUE: &'static str = "true";
-pub(crate) const FALSE: &'static str = "false";
-pub(crate) const NULL: &'static str = "null";
-pub(crate) const ARRAY: &'static str = "array";
+pub(crate) const OBJECT: &str = "object";
+pub(crate) const NUMBER: &str = "number";
+pub(crate) const STRING: &str = "string";
+pub(crate) const STRING_CONTENT: &str = "string_content";
+pub(crate) const TRUE: &str = "true";
+pub(crate) const FALSE: &str = "false";
+pub(crate) const NULL: &str = "null";
+pub(crate) const ARRAY: &str = "array";
 
 use std::cell::RefCell;
 thread_local! {
@@ -128,7 +128,7 @@ impl DocumentParser {
             }
             current = parent.parent();
         }
-        parents.into()
+        parents
     }
 
     pub fn get_parent_pair_node<'a>(&'a self, node: &'a Node<'a>) -> Node<'a> {
@@ -146,7 +146,7 @@ impl DocumentParser {
         node.named_children(&mut node.walk()).any(|node| {
             let r: bool = node.kind() == "object";
             if r {
-                return true;
+                true
             } else {
                 let child0 = node.child(0);
                 let child1 = node.child(1);
@@ -161,7 +161,7 @@ impl DocumentParser {
         node.named_children(&mut node.walk()).any(|node| {
             let r: bool = node.kind() == "object" || node.kind() == "array";
             if r {
-                return true;
+                true
             } else {
                 let child0 = node.child(0);
                 let child1 = node.child(1);
@@ -285,15 +285,12 @@ impl DocumentParser {
 
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            if child.kind() == "pair" {
-                if let Some(key_node) = child.child_by_field_name("key") {
-                    if let Some(key) = self.string(key_node) {
-                        if key == field_name {
+            if child.kind() == "pair"
+                && let Some(key_node) = child.child_by_field_name("key")
+                    && let Some(key) = self.string(key_node)
+                        && key == field_name {
                             return child.child_by_field_name("value");
                         }
-                    }
-                }
-            }
         }
         None
     }
@@ -354,15 +351,12 @@ impl DocumentParser {
 
         let mut cursor = node.walk();
         for child in node.named_children(&mut cursor) {
-            if child.kind() == "pair" {
-                if let Some(key_node) = child.child_by_field_name("key") {
-                    if let Some(key) = self.string(key_node) {
-                        if key == field_name {
+            if child.kind() == "pair"
+                && let Some(key_node) = child.child_by_field_name("key")
+                    && let Some(key) = self.string(key_node)
+                        && key == field_name {
                             return child.child_by_field_name("value");
                         }
-                    }
-                }
-            }
         }
         None
     }
@@ -666,7 +660,7 @@ impl DocumentParser {
                 if let (Some(key), Some(value)) = (key_node, value_node) {
                     let key_text = self.string(key)?;
                     if key_text == "namespace" {
-                        return Some(self.string(value)?);
+                        return self.string(value);
                     }
                 }
             }
@@ -804,6 +798,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)]
     fn test_node_conversions() {
         let json = r#"{
             "string": "test",

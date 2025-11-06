@@ -46,18 +46,17 @@ impl SymbolIndexer {
         let mut new_parser: bool = false;
         let parser = self.parsers.entry(hash_url).or_insert_with(|| {
             new_parser = true;
-            DocumentParser::new(hash_url, &content)
+            DocumentParser::new(hash_url, content)
         });
         let namespace = parser.namespace();
-        if namespace.as_ref() != "Unknown" {
-            if new_parser {
+        if namespace.as_ref() != "Unknown"
+            && new_parser {
                 trace!("Init parser, url({}) hash_url({})", url, hash_url);
                 self.namespace_to_url
                     .entry(parser.namespace())
                     .or_insert(url.clone());
                 self.index_document(&parser);
             }
-        }
     }
 
     /// Delete a document and cleanup all its symbols
@@ -204,12 +203,11 @@ impl SymbolIndexer {
     /// Uses atomic DashMap operations to avoid race conditions.
     fn cleanup_namespace(&self, namespace: &Arc<str>, url: &Url) {
         // Use entry API for atomic check-and-remove
-        if let Some(entry) = self.namespace_to_url.get(namespace) {
-            if entry.value() == url {
+        if let Some(entry) = self.namespace_to_url.get(namespace)
+            && entry.value() == url {
                 drop(entry); // Release read lock before removing
                 self.namespace_to_url.remove(namespace);
             }
-        }
     }
 
     /// Get or create a parser for a URL
@@ -330,15 +328,11 @@ impl SymbolIndexer {
         doc_hash: u64,
     ) {
         let node = cursor.node();
-        match node.kind() {
-            STRING => {
-                if let Some((symbol, meta)) = self.detect_symbol(&node, parser) {
-                    symbol_table.insert(symbol.id(), symbol.clone());
-                    metadata.push((symbol, meta, doc_hash));
-                }
+        if node.kind() == STRING
+            && let Some((symbol, meta)) = self.detect_symbol(&node, parser) {
+                symbol_table.insert(symbol.id(), symbol.clone());
+                metadata.push((symbol, meta, doc_hash));
             }
-            _ => {}
-        }
         if cursor.goto_first_child() {
             loop {
                 self.traverse_node(cursor, symbol_table, metadata, parser, doc_hash);
@@ -364,7 +358,7 @@ impl SymbolIndexer {
             // for the control node, the first parent its own pair node, so it needs to query again
             let parent_parent = self.get_parent_control_name(parser, &parent_node);
             let id: ControlId = self.split_control_name(string_content, parser.namespace())?;
-            let range = Self::node_range(&node);
+            let range = Self::node_range(node);
             let symbol = Arc::new(Symbol::Control(Control {
                 id,
                 range,
@@ -378,11 +372,11 @@ impl SymbolIndexer {
             return Some((symbol, metadata));
         }
 
-        if string_content.starts_with('$') {
-            if let Some(parent) = parent {
+        if string_content.starts_with('$')
+            && let Some(parent) = parent {
                 let symbol = Arc::new(Symbol::Variable(Variable {
                     parent,
-                    range: Self::node_range(&node),
+                    range: Self::node_range(node),
                     value: Arc::from(string_content.as_str()),
                 }));
                 let metadata = node
@@ -397,14 +391,13 @@ impl SymbolIndexer {
                     .unwrap_or(MetaData { is_declare: false });
                 return Some((symbol, metadata));
             }
-        }
 
         if string_content.eq("color") {
             // get the parent control name for color node
             let parent = parent?;
             let (value, range) = node
                 .next_named_sibling()
-                .map(|ref sibling| match sibling.kind() {
+                .and_then(|ref sibling| match sibling.kind() {
                     STRING => {
                         let range = Self::node_range(sibling);
                         let v = ColorValue::String(parser.get_string(sibling).unwrap_or("".to_string()));
@@ -419,8 +412,7 @@ impl SymbolIndexer {
                         Some((ColorValue::Vec(vec), range))
                     }
                     _ => None,
-                })
-                .flatten()?;
+                })?;
             let node = Arc::new(Symbol::Color(Color { parent, range, value }));
             let metadata = MetaData { is_declare: false };
             return Some((node, metadata));
@@ -437,8 +429,7 @@ impl SymbolIndexer {
         parent
             .named_child(0)
             .and_then(|child| parser.get_string(&child))
-            .map(|name| self.split_control_name(name, parser.namespace()))
-            .flatten()
+            .and_then(|name| self.split_control_name(name, parser.namespace()))
     }
 
     /// Check if a node represents a control key
@@ -448,7 +439,7 @@ impl SymbolIndexer {
             .and_then(|colon| colon.next_sibling())
             .filter(|value| value.kind() == "object")
             .and_then(|_| node.parent())
-            .map_or(false, |parent| parent.kind() == "pair")
+            .is_some_and(|parent| parent.kind() == "pair")
     }
 
     /// Convert tree-sitter node to HashRange

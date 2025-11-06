@@ -142,11 +142,11 @@ pub struct HashPosition {
     /// Character offset on a line in a document (zero-based)
     pub character: u32,
 }
-impl Into<lsp_types::Position> for HashPosition {
-    fn into(self) -> lsp_types::Position {
+impl From<HashPosition> for lsp_types::Position {
+    fn from(val: HashPosition) -> Self {
         lsp_types::Position {
-            line: self.line,
-            character: self.character,
+            line: val.line,
+            character: val.character,
         }
     }
 }
@@ -184,11 +184,11 @@ impl Ord for HashRange {
         self_size.cmp(&other_size)
     }
 }
-impl Into<lsp_types::Range> for HashRange {
-    fn into(self) -> lsp_types::Range {
+impl From<HashRange> for lsp_types::Range {
+    fn from(val: HashRange) -> Self {
         lsp_types::Range {
-            start: self.start.into(),
-            end: self.end.into(),
+            start: val.start.into(),
+            end: val.end.into(),
         }
     }
 }
