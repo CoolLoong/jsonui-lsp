@@ -103,7 +103,7 @@ impl LanguageServer for Backend {
         };
         Ok(InitializeResult {
             server_info: Some(ServerInfo {
-                name: "jsonui support".to_string(),
+                name: "jsonui-lsp".to_string(),
                 version: None,
             }),
             capabilities: ServerCapabilities {
@@ -532,6 +532,6 @@ async fn main() {
         workspace_initialized: Arc::new(AtomicBool::new(false)),
     })
     .finish();
-    info!("starting jsonui_lsp...");
+    info!("starting jsonui-lsp...");
     Server::new(stdin, stdout, socket).serve(service).await;
 }

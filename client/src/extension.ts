@@ -40,7 +40,7 @@ export async function activate(context: ExtensionContext) {
   };
   client = new LanguageClient(
     "jsonui-support",
-    "jsonui-support-server",
+    "JSON UI Server",
     serverOptions,
     clientOptions
   );

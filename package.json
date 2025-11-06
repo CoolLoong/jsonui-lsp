@@ -1,6 +1,6 @@
 {
   "name": "jsonui-support",
-  "description": "jsonui support",
+  "description": "jsonui language server",
   "publisher": "CoolLoong",
   "license": "MIT",
   "version": "0.3.0",

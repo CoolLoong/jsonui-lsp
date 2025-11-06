@@ -1,6 +1,3 @@
-// Library module exports for jsonui_lsp
-// This allows benchmarks and tests to access internal modules
-
 pub mod completer;
 pub mod config;
 pub mod document_manager;
