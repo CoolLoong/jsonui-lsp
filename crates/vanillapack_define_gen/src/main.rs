@@ -48,7 +48,9 @@ fn main() -> io::Result<()> {
     }
 
     let output_path = format!("crates/jsonui_lsp/resources/vanillapack_define_{}.json", VERSION);
-    let output_dir = Path::new(output_path.as_str()).parent().unwrap();
+    let output_dir = Path::new(output_path.as_str())
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid output path"))?;
     if !output_dir.exists() {
         fs::create_dir_all(output_dir)?;
     }
@@ -71,8 +73,8 @@ fn process_file(path: &Path, namespace_map: &mut HashMap<String, Value>) -> io::
     let mut content = String::new();
     file.read_to_string(&mut content)?;
     let value: Value = parse_to_serde_value(content.as_str(), &Default::default())
-        .unwrap()
-        .unwrap();
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("Parse error: {:?}", e)))?
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "No value parsed"))?;
     if let Some(namespace) = value.get("namespace").and_then(Value::as_str) {
         namespace_map.insert(namespace.to_string(), value);
     }
@@ -86,7 +88,10 @@ fn process_properties(
     export_map: &mut HashMap<String, serde_json::Value>,
     namespace_map: &HashMap<String, Value>,
 ) {
-    for (key, value) in properties.as_object().unwrap() {
+    let Some(properties_obj) = properties.as_object() else {
+        return;
+    };
+    for (key, value) in properties_obj {
         let split_key: Vec<&str> = key.split('@').collect();
         let np = name.unwrap_or(split_key[0]).to_string();
 
@@ -103,7 +108,9 @@ fn process_properties(
         if key.contains('@') {
             handle_namespace(key, namespace, namespace_map, name, export_map);
         } else if key == "type" {
-            set_export_type(export_map, &np, value.as_str().unwrap());
+            if let Some(type_str) = value.as_str() {
+                set_export_type(export_map, &np, type_str);
+            }
         } else if key.starts_with('$') {
             update_export_map(export_map, &np, key.replace("|default", ""));
         }
@@ -114,12 +121,13 @@ fn update_export_map(export_map: &mut HashMap<String, serde_json::Value>, key: &
     if variable.starts_with("$") {
         let entry = export_map.entry(key.to_string()).or_insert_with(|| json!({}));
         if let Value::Object(map) = entry {
-            let variables = map
+            if let Some(variables) = map
                 .entry("variables")
                 .or_insert_with(|| json!([]))
                 .as_array_mut()
-                .unwrap();
-            variables.push(json!(variable));
+            {
+                variables.push(json!(variable));
+            }
         }
     }
 }
@@ -152,15 +160,18 @@ fn handle_namespace(
                 for (kk, v) in ns_properties {
                     if extract_prefix(kk) == cn {
                         let next_name = name.or(Some(parts[0]));
-                        let json = format!("{{ \"{}\": {} }}", kk, serde_json::to_string(v).unwrap());
-                        let target = serde_json::from_str(json.as_str()).unwrap();
-                        process_properties(
-                            next_name,
-                            &np.to_string(),
-                            &target,
-                            export_map,
-                            namespace_map,
-                        );
+                        if let Ok(v_str) = serde_json::to_string(v) {
+                            let json = format!("{{ \"{}\": {} }}", kk, v_str);
+                            if let Ok(target) = serde_json::from_str(json.as_str()) {
+                                process_properties(
+                                    next_name,
+                                    &np.to_string(),
+                                    &target,
+                                    export_map,
+                                    namespace_map,
+                                );
+                            }
+                        }
                         break;
                     }
                 }

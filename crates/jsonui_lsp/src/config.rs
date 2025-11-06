@@ -85,10 +85,17 @@ impl ConfigManager {
             // Update the tracing subscriber with new log level
             if let Some(handle) = self.log_reload_handle.lock().await.as_ref() {
                 // Only set log level for jsonui_lsp crate, keep other crates at warn level
-                let new_filter = EnvFilter::new("error")
-                    .add_directive(format!("jsonui_lsp={}", new.log_level.as_ref()).parse().unwrap());
-                if let Err(e) = handle.reload(new_filter) {
-                    eprintln!("Failed to reload log level: {}", e);
+                let directive_result = format!("jsonui_lsp={}", new.log_level.as_ref()).parse();
+                match directive_result {
+                    Ok(directive) => {
+                        let new_filter = EnvFilter::new("error").add_directive(directive);
+                        if let Err(e) = handle.reload(new_filter) {
+                            eprintln!("Failed to reload log level: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to parse log level directive: {}", e);
+                    }
                 }
             }
         }
@@ -168,7 +175,7 @@ mod tests {
 
         // All readers should complete without blocking
         for handle in handles {
-            handle.join().unwrap();
+            handle.join().expect("Thread should not panic");
         }
     }
 }

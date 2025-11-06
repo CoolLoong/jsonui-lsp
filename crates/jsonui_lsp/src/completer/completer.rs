@@ -510,7 +510,8 @@ impl Completer {
     fn is_pair_array(&self, node: &Node) -> bool {
         let n1 = node.child(1);
         let n2 = node.child(2);
-        n1.is_some() && n1.unwrap().kind() == ":" && n2.is_some() && n2.unwrap().kind() == ARRAY
+        matches!(n1.as_ref().map(|n| n.kind()), Some(":"))
+            && matches!(n2.as_ref().map(|n| n.kind()), Some(ARRAY))
     }
 
     fn is_binding(&self, parser: &DocumentParser, node: &Node) -> bool {
@@ -557,17 +558,17 @@ impl Completer {
 
         // Get type-specific keys
         let type_key = {
-            let key = parent.named_child(0).unwrap();
-            let value = parent.named_child(1).unwrap();
+            let key = parent.named_child(0)?;
+            let value = parent.named_child(1)?;
             let type_n = parser_ref.field(value, "type");
 
-            let control_id = parser_ref.string(key).unwrap();
+            let control_id = parser_ref.string(key)?;
             let control_id = self
                 .indexer
                 .split_control_name(control_id, parser_ref.namespace());
             if let Some(control_id) = control_id {
                 let type_n = if let Some(type_n) = type_n {
-                    Some(Arc::from(parser_ref.string(type_n).unwrap().as_str()))
+                    parser_ref.string(type_n).map(|s| Arc::from(s.as_str()))
                 } else {
                     if let Some(control_id_no_parent) = control_id.2 {
                         drop(parser_ref);

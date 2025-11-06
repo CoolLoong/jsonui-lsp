@@ -159,7 +159,9 @@ impl LanguageServer for Backend {
         self.client.log_message(MessageType::INFO, "initialized!").await;
 
         let root = self.root_path.lock().await;
-        self.init_workspace(root.clone().unwrap()).await;
+        if let Some(root_path) = root.clone() {
+            self.init_workspace(root_path).await;
+        }
 
         // Mark workspace as initialized
         self.workspace_initialized.store(true, Ordering::SeqCst);
@@ -475,7 +477,10 @@ async fn main() {
 
     // Initialize tracing subscriber with reload capability - MUST write to stderr, not stdout
     // LSP protocol uses stdout for communication
-    let filter = EnvFilter::new("error").add_directive("jsonui_lsp=info".parse().unwrap());
+    let directive = "jsonui_lsp=info"
+        .parse()
+        .expect("Invalid log directive: jsonui_lsp=info");
+    let filter = EnvFilter::new("error").add_directive(directive);
     let (filter, reload_handle) = tracing_subscriber::reload::Layer::new(filter);
 
     tracing_subscriber::registry()

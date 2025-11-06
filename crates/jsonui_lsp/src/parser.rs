@@ -79,7 +79,9 @@ impl DocumentParser {
             let local_offset = byte_offset - chunk_start_byte;
             &chunk.as_bytes()[local_offset..]
         };
-        let tree = PARSER.with_borrow_mut(|p| p.parse_with_options(&mut callback, None, None).unwrap());
+        let tree = PARSER
+            .with_borrow_mut(|p| p.parse_with_options(&mut callback, None, None))
+            .expect("Failed to parse JSON with tree-sitter");
         let object = tree
             .root_node()
             .named_children(&mut tree.root_node().walk())
@@ -149,8 +151,8 @@ impl DocumentParser {
                 let child0 = node.child(0);
                 let child1 = node.child(1);
                 node.kind() == "ERROR"
-                    && (child0.is_some() && child0.unwrap().kind() == "{"
-                        || child1.is_some() && child1.unwrap().kind() == "{")
+                    && (matches!(child0.as_ref().map(|n| n.kind()), Some("{"))
+                        || matches!(child1.as_ref().map(|n| n.kind()), Some("{")))
             }
         })
     }
@@ -164,8 +166,8 @@ impl DocumentParser {
                 let child0 = node.child(0);
                 let child1 = node.child(1);
                 node.kind() == "ERROR"
-                    && ((child0.is_some() && matches!(child0.unwrap().kind(), "{" | "["))
-                        || (child1.is_some() && matches!(child1.unwrap().kind(), "{" | "[")))
+                    && (matches!(child0.as_ref().map(|n| n.kind()), Some("{" | "["))
+                        || matches!(child1.as_ref().map(|n| n.kind()), Some("{" | "[")))
             }
         })
     }
@@ -203,13 +205,10 @@ impl DocumentParser {
     }
 
     pub fn hashmap(&self) -> BfastHashMap<String, Value> {
-        let root = self.root();
+        let Some(root) = self.root() else {
+            return BfastHashMap::default();
+        };
         let mut result = BfastHashMap::default();
-        if root.is_none() {
-            return result;
-        }
-        let root = root.unwrap();
-
         let mut cursor = root.walk();
         for child in root.children(&mut cursor) {
             if let Some((key, value)) = self.parse_key_value_pair(child) {
@@ -428,10 +427,9 @@ impl DocumentParser {
                 let local_offset = byte_offset - chunk_start_byte;
                 &chunk.as_bytes()[local_offset..]
             };
-            self.tree = PARSER.with_borrow_mut(|p| {
-                p.parse_with_options(&mut callback, Some(&self.tree), None)
-                    .unwrap()
-            });
+            self.tree = PARSER
+                .with_borrow_mut(|p| p.parse_with_options(&mut callback, Some(&self.tree), None))
+                .expect("Failed to re-parse JSON after edit");
 
             let namespace = self.find_namespace_value_byself();
             self.namespace = Arc::from(namespace.unwrap_or("Unknown".to_string()).as_str());
@@ -501,15 +499,10 @@ impl DocumentParser {
     }
 
     fn compute_end_position(start: Option<Position>, text: &str) -> Point {
-        let mut row: usize = if start.is_none() {
-            0
+        let (mut row, mut column) = if let Some(start) = start {
+            (start.line as usize, start.character as usize)
         } else {
-            start.unwrap().line as usize
-        };
-        let mut column: usize = if start.is_none() {
-            0
-        } else {
-            start.unwrap().character as usize
+            (0, 0)
         };
         let chars = text.graphemes(true);
         for c in chars {
