@@ -17,7 +17,7 @@ pub(crate) mod towerlsp {
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::Mutex as TokioMutex;
+use std::sync::OnceLock;
 use tower_lsp::lsp_types::InitializeParams;
 use towerlsp::*;
 use tracing::{info, trace};
@@ -36,7 +36,7 @@ struct Backend {
     config: Arc<ConfigManager>,
     completer: Arc<Completer>,
     document_manager: Arc<DocumentManager>,
-    root_path: Arc<TokioMutex<Option<PathBuf>>>,
+    root_path: OnceLock<PathBuf>,
     navigation_state: NavigationStateManager,
     workspace_initialized: Arc<AtomicBool>,
 }
@@ -87,7 +87,7 @@ impl LanguageServer for Backend {
         if let Some(root_url) = param.root_uri
             && let Ok(workspace) = root_url.to_file_path()
         {
-            *self.root_path.lock().await = Some(workspace);
+            let _ = self.root_path.set(workspace);
         }
 
         let file_operation_filters = vec![FileOperationFilter {
@@ -158,9 +158,8 @@ impl LanguageServer for Backend {
     async fn initialized(&self, _: InitializedParams) {
         self.client.log_message(MessageType::INFO, "initialized!").await;
 
-        let root = self.root_path.lock().await;
-        if let Some(root_path) = root.clone() {
-            self.init_workspace(root_path).await;
+        if let Some(root_path) = self.root_path.get() {
+            self.init_workspace(root_path.clone()).await;
         }
 
         // Mark workspace as initialized
@@ -330,26 +329,45 @@ impl LanguageServer for Backend {
         if self.navigation_state.should_ignore_open() {
             return;
         }
+
+        if !self.is_in_workspace(&params.uri) {
+            self.document_manager.cancel_delayed_close(&params.uri);
+        }
+
         self.document_manager
             .request_open(OpenRequest::Content(params.uri, params.text));
     }
 
-    async fn did_close(&self, _params: DidCloseTextDocumentParams) {
-        // No action needed - files remain indexed for cross-file navigation
-        // Data is only cleaned up when files are actually deleted
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let url = params.text_document.uri;
+
+        if !self.is_in_workspace(&url) {
+            self.document_manager.request_delayed_close(url);
+        }
     }
 
     async fn did_delete_files(&self, params: DeleteFilesParams) {
         for i in params.files.iter() {
             if let Ok(url) = Url::parse(&i.uri) {
                 trace!("File deleted: {}", url);
-                self.completer.did_delete(&url);
+                self.completer.did_close(&url);
             }
         }
     }
 }
 
 impl Backend {
+    /// Check if a file URL is within the workspace
+    /// Returns true if the file is in workspace, false if it's a standalone file
+    fn is_in_workspace(&self, url: &Url) -> bool {
+        if let Some(workspace_root) = self.root_path.get() {
+            if let Ok(file_path) = url.to_file_path() {
+                return file_path.starts_with(workspace_root);
+            }
+        }
+        false
+    }
+
     async fn init_workspace(&self, workspace_folders: PathBuf) {
         let json_files: Vec<_> = WalkDir::new(&workspace_folders)
             .into_iter()
@@ -509,7 +527,7 @@ async fn main() {
         config: config_manager,
         completer: completer.clone(),
         document_manager,
-        root_path: Arc::new(TokioMutex::new(Option::<PathBuf>::None)),
+        root_path: OnceLock::new(),
         navigation_state: NavigationStateManager::new(),
         workspace_initialized: Arc::new(AtomicBool::new(false)),
     })

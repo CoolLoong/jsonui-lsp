@@ -42,8 +42,8 @@ impl Completer {
     pub async fn did_open(&self, url: &Url, content: &str) {
         self.indexer.did_open(url, content).await;
     }
-    pub fn did_delete(&self, url: &Url) {
-        self.indexer.did_delete(url);
+    pub fn did_close(&self, url: &Url) {
+        self.indexer.did_close(url);
     }
     pub async fn did_change(&self, url: Url, params: &DidChangeTextDocumentParams) {
         self.indexer.did_change(url, params).await;

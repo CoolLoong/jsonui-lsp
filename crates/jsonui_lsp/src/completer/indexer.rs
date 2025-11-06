@@ -64,7 +64,7 @@ impl SymbolIndexer {
     ///
     /// This is called when a file is actually deleted from disk (not just closed in editor).
     /// It removes all parsers, symbols, and index entries for the file.
-    pub(crate) fn did_delete(&self, url: &Url) {
+    pub(crate) fn did_close(&self, url: &Url) {
         let hash_url = hash_url(url);
 
         // Get namespace before removing parser
@@ -208,7 +208,6 @@ impl SymbolIndexer {
             if entry.value() == url {
                 drop(entry); // Release read lock before removing
                 self.namespace_to_url.remove(namespace);
-                trace!("Cleaned up namespace mapping: {} -> {}", namespace, url);
             }
         }
     }
