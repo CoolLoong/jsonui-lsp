@@ -1,0 +1,221 @@
+name: Update vanilla pack definitions
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-vanillapack
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.repository == 'CoolLoong/jsonui-lsp'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Install stable Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt
+
+      - name: Find newer stable Bedrock version
+        id: versions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          latest_tag="$(
+            git ls-remote --tags --refs https://github.com/Mojang/bedrock-samples.git |
+              python3 -c '
+          import re
+          import sys
+
+          tags = []
+          for line in sys.stdin:
+              tag = line.rstrip().split("refs/tags/", 1)[-1]
+              match = re.fullmatch(r"v?([0-9]+(?:\.[0-9]+){2,3})", tag)
+              if match:
+                  parts = tuple(int(part) for part in match.group(1).split("."))
+                  tags.append((parts + (0,) * (4 - len(parts)), tag))
+          if not tags:
+              raise SystemExit("No numeric non-preview tags found")
+          print(max(tags)[1])
+          '
+          )"
+          latest_version="${latest_tag#v}"
+          current_version="$(
+            python3 - <<'PY'
+          import pathlib
+          import re
+
+          source = pathlib.Path("crates/jsonui_lsp/src/lib.rs").read_text()
+          versions = re.findall(
+              r'include_str!\("\.\./resources/vanillapack_define_([0-9]+(?:\.[0-9]+){2,3})\.json"\)',
+              source,
+          )
+          if len(versions) != 1:
+              raise SystemExit(f"Expected one active vanilla pack include, found {len(versions)}")
+          print(versions[0])
+          PY
+          )"
+
+          if python3 - "$current_version" "$latest_version" <<'PY'
+          import sys
+
+          def numeric(version):
+              parts = tuple(int(part) for part in version.split("."))
+              return parts + (0,) * (4 - len(parts))
+
+          raise SystemExit(0 if numeric(sys.argv[2]) > numeric(sys.argv[1]) else 1)
+          PY
+          then
+            update=true
+          else
+            update=false
+            printf 'No update: active=%s latest=%s\n' "$current_version" "$latest_version"
+          fi
+
+          printf 'current=%s\n' "$current_version" >> "$GITHUB_OUTPUT"
+          printf 'tag=%s\n' "$latest_tag" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "$latest_version" >> "$GITHUB_OUTPUT"
+          printf 'update=%s\n' "$update" >> "$GITHUB_OUTPUT"
+
+      - name: Check out Bedrock UI files
+        if: steps.versions.outputs.update == 'true'
+        id: samples
+        shell: bash
+        env:
+          BEDROCK_TAG: ${{ steps.versions.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          source_dir="$RUNNER_TEMP/bedrock-samples"
+          rm -rf -- "$source_dir"
+          git init --quiet "$source_dir"
+          git -C "$source_dir" remote add origin https://github.com/Mojang/bedrock-samples.git
+          git -C "$source_dir" sparse-checkout init --no-cone
+          printf '/resource_pack/ui/\n' | git -C "$source_dir" sparse-checkout set --stdin
+          git -C "$source_dir" fetch --depth=1 --filter=blob:none origin \
+            "refs/tags/${BEDROCK_TAG}:refs/tags/${BEDROCK_TAG}"
+          git -C "$source_dir" checkout --quiet --detach "refs/tags/${BEDROCK_TAG}"
+          test -d "$source_dir/resource_pack/ui"
+          printf 'ui_dir=%s\n' "$source_dir/resource_pack/ui" >> "$GITHUB_OUTPUT"
+
+      - name: Generate vanilla pack definitions
+        if: steps.versions.outputs.update == 'true'
+        id: generate
+        shell: bash
+        env:
+          UI_DIR: ${{ steps.samples.outputs.ui_dir }}
+          VERSION: ${{ steps.versions.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          cargo +stable run --locked -p vanillapack_define_gen -- "$UI_DIR" "$VERSION"
+          resource="crates/jsonui_lsp/resources/vanillapack_define_${VERSION}.json"
+          test -s "$resource"
+          printf 'resource=%s\n' "$resource" >> "$GITHUB_OUTPUT"
+
+      - name: Update active version references
+        if: steps.versions.outputs.update == 'true'
+        env:
+          CURRENT_VERSION: ${{ steps.versions.outputs.current }}
+          VERSION: ${{ steps.versions.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+
+          current = os.environ["CURRENT_VERSION"]
+          version = os.environ["VERSION"]
+
+          lib_path = pathlib.Path("crates/jsonui_lsp/src/lib.rs")
+          lib_source = lib_path.read_text()
+          include_pattern = re.compile(
+              r'include_str!\("\.\./resources/vanillapack_define_([0-9]+(?:\.[0-9]+){2,3})\.json"\)'
+          )
+          matches = include_pattern.findall(lib_source)
+          if matches != [current]:
+              raise SystemExit(f"Active include assertion failed: {matches!r}")
+          lib_source, replacements = include_pattern.subn(
+              f'include_str!("../resources/vanillapack_define_{version}.json")',
+              lib_source,
+          )
+          if replacements != 1:
+              raise SystemExit(f"Expected one include replacement, found {replacements}")
+          lib_path.write_text(lib_source)
+
+          readme_path = pathlib.Path("README.md")
+          readme = readme_path.read_text()
+          old_badge = f"minecraft-v{current}_(Bedrock)-black"
+          new_badge = f"minecraft-v{version}_(Bedrock)-black"
+          if readme.count(old_badge) != 1:
+              raise SystemExit("README badge assertion failed")
+          readme_path.write_text(readme.replace(old_badge, new_badge))
+          PY
+
+      - name: Validate generated update
+        if: steps.versions.outputs.update == 'true'
+        shell: bash
+        env:
+          RESOURCE: ${{ steps.generate.outputs.resource }}
+        run: |
+          set -euo pipefail
+
+          python3 -m json.tool "$RESOURCE" > /dev/null
+          cargo +stable fmt -p vanillapack_define_gen -- --check
+          cargo +stable check --workspace --locked
+          cargo +stable test --workspace --locked
+
+      - name: Commit and push expected files
+        if: steps.versions.outputs.update == 'true'
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          RESOURCE: ${{ steps.generate.outputs.resource }}
+          VERSION: ${{ steps.versions.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          actual_changes="$(mktemp)"
+          expected_changes="$(mktemp)"
+          {
+            git diff --name-only
+            git ls-files --others --exclude-standard
+          } | sort -u > "$actual_changes"
+          printf '%s\n' \
+            README.md \
+            crates/jsonui_lsp/src/lib.rs \
+            "$RESOURCE" | sort -u > "$expected_changes"
+
+          while IFS= read -r path; do
+            grep -Fxq -- "$path" "$expected_changes" || {
+              printf 'Unexpected changed file: %s\n' "$path" >&2
+              exit 1
+            }
+          done < "$actual_changes"
+          git diff --quiet -- README.md && {
+            printf 'README.md was not updated\n' >&2
+            exit 1
+          }
+          git diff --quiet -- crates/jsonui_lsp/src/lib.rs && {
+            printf 'crates/jsonui_lsp/src/lib.rs was not updated\n' >&2
+            exit 1
+          }
+
+          git add -- README.md crates/jsonui_lsp/src/lib.rs "$RESOURCE"
+          git diff --cached --quiet && exit 0
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "chore: update vanilla pack definitions to ${VERSION}"
+          git push origin "HEAD:${DEFAULT_BRANCH}"

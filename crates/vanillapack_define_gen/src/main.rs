@@ -1,34 +1,23 @@
 use std::borrow::Borrow;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::env;
+use std::ffi::OsString;
 use std::fs::{self, File};
-use std::io::{self, Read, Write};
-use std::path::Path;
+use std::io::{self, Read};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use jsonc_parser::parse_to_serde_value;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use walkdir::WalkDir;
 
-const VERSION: &str = "1.21.120.4";
-
 fn main() -> io::Result<()> {
+    let (path, version) = parse_args(env::args_os())?;
     let namespace_map: Rc<RefCell<HashMap<String, Value>>> = Rc::new(RefCell::new(HashMap::new()));
     let mut result: HashMap<String, HashMap<String, serde_json::Value>> = HashMap::new();
 
-    print!("please input vanilla pack path: ");
-    io::stdout().flush()?;
-
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    let path = input.trim();
-
-    if !Path::new(path).is_dir() {
-        eprintln!("Err: '{}' not is valid path", path);
-        return Ok(());
-    }
-
-    for entry in WalkDir::new(path)
+    for entry in WalkDir::new(&path)
         .into_iter()
         .filter_map(Result::ok)
         .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
@@ -47,7 +36,7 @@ fn main() -> io::Result<()> {
         result.insert(k.clone(), export_map);
     }
 
-    let output_path = format!("crates/jsonui_lsp/resources/vanillapack_define_{}.json", VERSION);
+    let output_path = format!("crates/jsonui_lsp/resources/vanillapack_define_{version}.json");
     let output_dir = Path::new(output_path.as_str())
         .parent()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid output path"))?;
@@ -66,6 +55,51 @@ fn main() -> io::Result<()> {
     }
     println!("Spawn output path: {}", output_path);
     Ok(())
+}
+
+fn parse_args(args: impl IntoIterator<Item = OsString>) -> io::Result<(PathBuf, String)> {
+    let mut args = args.into_iter();
+    let _program = args.next();
+    let path = args.next().ok_or_else(usage_error)?;
+    let version = args.next().ok_or_else(usage_error)?;
+    if args.next().is_some() {
+        return Err(usage_error());
+    }
+
+    let path = PathBuf::from(path);
+    if !path.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("UI path is not a directory: {}", path.display()),
+        ));
+    }
+
+    let version = version
+        .into_string()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Version must be valid UTF-8"))?;
+    if !is_valid_version(&version) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Version must contain three or four numeric components",
+        ));
+    }
+
+    Ok((path, version))
+}
+
+fn usage_error() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, "Usage: vanillapack_define_gen <ui-directory> <version>")
+}
+
+fn is_valid_version(version: &str) -> bool {
+    let mut count = 0;
+    for component in version.split('.') {
+        if component.is_empty() || !component.bytes().all(|byte| byte.is_ascii_digit()) {
+            return false;
+        }
+        count += 1;
+    }
+    count == 3 || count == 4
 }
 
 fn process_file(path: &Path, namespace_map: &mut HashMap<String, Value>) -> io::Result<()> {
@@ -121,13 +155,10 @@ fn update_export_map(export_map: &mut HashMap<String, serde_json::Value>, key: &
     if variable.starts_with("$") {
         let entry = export_map.entry(key.to_string()).or_insert_with(|| json!({}));
         if let Value::Object(map) = entry
-            && let Some(variables) = map
-                .entry("variables")
-                .or_insert_with(|| json!([]))
-                .as_array_mut()
-            {
-                variables.push(json!(variable));
-            }
+            && let Some(variables) = map.entry("variables").or_insert_with(|| json!([])).as_array_mut()
+        {
+            variables.push(json!(variable));
+        }
     }
 }
 
@@ -155,26 +186,27 @@ fn handle_namespace(
             (namespace.as_ref(), parts_namespace[0])
         };
         if let Some(namespace_object) = namespace_map.get(np)
-            && let Some(ns_properties) = namespace_object.as_object() {
-                for (kk, v) in ns_properties {
-                    if extract_prefix(kk) == cn {
-                        let next_name = name.or(Some(parts[0]));
-                        if let Ok(v_str) = serde_json::to_string(v) {
-                            let json = format!("{{ \"{}\": {} }}", kk, v_str);
-                            if let Ok(target) = serde_json::from_str(json.as_str()) {
-                                process_properties(
-                                    next_name,
-                                    &np.to_string(),
-                                    &target,
-                                    export_map,
-                                    namespace_map,
-                                );
-                            }
+            && let Some(ns_properties) = namespace_object.as_object()
+        {
+            for (kk, v) in ns_properties {
+                if extract_prefix(kk) == cn {
+                    let next_name = name.or(Some(parts[0]));
+                    if let Ok(v_str) = serde_json::to_string(v) {
+                        let json = format!("{{ \"{}\": {} }}", kk, v_str);
+                        if let Ok(target) = serde_json::from_str(json.as_str()) {
+                            process_properties(
+                                next_name,
+                                &np.to_string(),
+                                &target,
+                                export_map,
+                                namespace_map,
+                            );
                         }
-                        break;
                     }
+                    break;
                 }
             }
+        }
     }
 }
 
@@ -182,5 +214,67 @@ fn extract_prefix(input: &str) -> &str {
     match input.find('@') {
         Some(index) => &input[..index],
         None => input,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::env;
+    use std::ffi::OsString;
+
+    use super::{is_valid_version, parse_args};
+
+    #[test]
+    fn validates_numeric_versions() {
+        assert!(is_valid_version("1.21.120"));
+        assert!(is_valid_version("1.21.120.4"));
+        assert!(!is_valid_version("v1.21.120.4"));
+        assert!(!is_valid_version("1.21"));
+        assert!(!is_valid_version("1.21.120.4.1"));
+        assert!(!is_valid_version("1.21.preview.4"));
+        assert!(!is_valid_version("1.21..4"));
+    }
+
+    #[test]
+    fn requires_exactly_two_arguments() {
+        let path = env::current_dir().unwrap().into_os_string();
+        assert!(
+            parse_args([
+                OsString::from("vanillapack_define_gen"),
+                path.clone(),
+                OsString::from("1.21.120.4"),
+            ])
+            .is_ok()
+        );
+        assert!(parse_args([OsString::from("vanillapack_define_gen")]).is_err());
+        assert!(
+            parse_args([
+                OsString::from("vanillapack_define_gen"),
+                path.clone(),
+                OsString::from("1.21.120.4"),
+                OsString::from("extra"),
+            ])
+            .is_err()
+        );
+        assert!(
+            parse_args([
+                OsString::from("vanillapack_define_gen"),
+                path,
+                OsString::from("preview"),
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn rejects_non_directory_path() {
+        assert!(
+            parse_args([
+                OsString::from("vanillapack_define_gen"),
+                env::current_exe().unwrap().into_os_string(),
+                OsString::from("1.21.120.4"),
+            ])
+            .is_err()
+        );
     }
 }
