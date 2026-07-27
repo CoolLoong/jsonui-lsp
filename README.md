@@ -3,7 +3,7 @@
 [![CI](https://github.com/CoolLoong/jsonui-lsp/actions/workflows/ci.yml/badge.svg)](https://github.com/CoolLoong/jsonui-lsp/actions/workflows/ci.yml)
 [![GitHub License](https://img.shields.io/github/license/CoolLoong/jsonui-lsp)](LICENSE)
 [![Discord](https://img.shields.io/discord/1304443010439970876?label=Discord&logo=discord)](https://discord.gg/S2ZKgGusjk)
-[![Minecraft - Version](https://img.shields.io/badge/minecraft-v1.21.120.4_(Bedrock)-black)](https://feedback.minecraft.net/hc/en-us/articles)
+[![Minecraft - Version](https://img.shields.io/badge/minecraft-v1.26.30.5_(Bedrock)-black)](https://feedback.minecraft.net/hc/en-us/articles)
 [![Ko-Fi](https://img.shields.io/badge/Buy_Me_a_Coffee-f37574?logo=kofi&logoColor=white)](https://patreon.com/coolloong)
 
 ### Introduction
