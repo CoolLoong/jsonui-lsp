@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::ffi::OsString;
 use std::fs::{self, File};
@@ -32,7 +32,8 @@ fn main() -> io::Result<()> {
     let map: &RefCell<HashMap<String, Value>> = namespace_map.borrow();
     for (k, v) in map.borrow().iter() {
         let mut export_map: HashMap<String, serde_json::Value> = HashMap::new();
-        process_properties(None, &k.clone(), v, &mut export_map, &map.borrow());
+        let mut resolving = HashSet::new();
+        process_properties(None, k, v, &mut export_map, &map.borrow(), &mut resolving);
         result.insert(k.clone(), export_map);
     }
 
@@ -117,10 +118,11 @@ fn process_file(path: &Path, namespace_map: &mut HashMap<String, Value>) -> io::
 
 fn process_properties(
     name: Option<&str>,
-    namespace: &String,
+    namespace: &str,
     properties: &Value,
     export_map: &mut HashMap<String, serde_json::Value>,
     namespace_map: &HashMap<String, Value>,
+    resolving: &mut HashSet<(String, String)>,
 ) {
     let Some(properties_obj) = properties.as_object() else {
         return;
@@ -140,7 +142,7 @@ fn process_properties(
         }
 
         if key.contains('@') {
-            handle_namespace(key, namespace, namespace_map, name, export_map);
+            handle_namespace(key, namespace, namespace_map, name, export_map, resolving);
         } else if key == "type" {
             if let Some(type_str) = value.as_str() {
                 set_export_type(export_map, &np, type_str);
@@ -171,10 +173,11 @@ fn set_export_type(export_map: &mut HashMap<String, serde_json::Value>, key: &st
 
 fn handle_namespace(
     key: &str,
-    namespace: &String,
+    namespace: &str,
     namespace_map: &HashMap<String, Value>,
     name: Option<&str>,
     export_map: &mut HashMap<String, serde_json::Value>,
+    resolving: &mut HashSet<(String, String)>,
 ) {
     let parts: Vec<&str> = key.split('@').collect();
     if parts.len() == 2 {
@@ -190,18 +193,23 @@ fn handle_namespace(
         {
             for (kk, v) in ns_properties {
                 if extract_prefix(kk) == cn {
-                    let next_name = name.or(Some(parts[0]));
-                    if let Ok(v_str) = serde_json::to_string(v) {
-                        let json = format!("{{ \"{}\": {} }}", kk, v_str);
-                        if let Ok(target) = serde_json::from_str(json.as_str()) {
-                            process_properties(
-                                next_name,
-                                &np.to_string(),
-                                &target,
-                                export_map,
-                                namespace_map,
-                            );
+                    let reference = (np.to_owned(), cn.to_owned());
+                    if resolving.insert(reference.clone()) {
+                        let next_name = name.or(Some(parts[0]));
+                        if let Ok(v_str) = serde_json::to_string(v) {
+                            let json = format!("{{ \"{}\": {} }}", kk, v_str);
+                            if let Ok(target) = serde_json::from_str(json.as_str()) {
+                                process_properties(
+                                    next_name,
+                                    np,
+                                    &target,
+                                    export_map,
+                                    namespace_map,
+                                    resolving,
+                                );
+                            }
                         }
+                        resolving.remove(&reference);
                     }
                     break;
                 }
@@ -219,10 +227,13 @@ fn extract_prefix(input: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{HashMap, HashSet};
     use std::env;
     use std::ffi::OsString;
 
-    use super::{is_valid_version, parse_args};
+    use serde_json::json;
+
+    use super::{is_valid_version, parse_args, process_properties};
 
     #[test]
     fn validates_numeric_versions() {
@@ -276,5 +287,32 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    fn skips_cyclic_namespace_references() {
+        let namespace_map = HashMap::from([(
+            "test".to_string(),
+            json!({
+                "namespace": "test",
+                "widget": {
+                    "type": "panel",
+                    "loop@test.widget": {}
+                }
+            }),
+        )]);
+        let mut export_map = HashMap::new();
+        let mut resolving = HashSet::new();
+
+        process_properties(
+            None,
+            "test",
+            &json!({ "entry@test.widget": {} }),
+            &mut export_map,
+            &namespace_map,
+            &mut resolving,
+        );
+
+        assert_eq!(export_map["entry"]["type"], "panel");
     }
 }
